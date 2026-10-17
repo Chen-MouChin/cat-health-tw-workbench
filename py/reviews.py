@@ -347,7 +347,31 @@ class Store:
             for e in rec["log"]:
                 items.append({"slug": slug, **{k: v for k, v in e.items() if k != "diff"}, "has_diff": bool(e.get("diff"))})
         items.sort(key=lambda e: e["at"], reverse=True)
-        return items[:limit]
+        # 同一個人在同一篇連續做同一件事（例如一次回覆十幾則註解）併成一筆，免得把別人的紀錄擠掉
+        grouped: list[dict] = []
+        for e in items:
+            act = _feed_action(e["action"])
+            last = grouped[-1] if grouped else None
+            if last and last["slug"] == e["slug"] and last["who"] == e["who"] and last["_act"] == act:
+                last["n"] += 1
+                last["has_diff"] = last["has_diff"] or e["has_diff"]
+                continue
+            grouped.append({**e, "_act": act, "n": 1})
+            if len(grouped) > limit:
+                break
+        out = []
+        for g in grouped[:limit]:
+            act = g.pop("_act")
+            if g["n"] > 1:
+                g["action"], g["detail"] = f"{act} {g['n']} 則", ""
+            out.append(g)
+        return out
+
+
+def _feed_action(action: str) -> str:
+    """動態列表用的動作名稱：回覆與解決註解視為同一件事，括號裡的說明不算。"""
+    base = action.split("（", 1)[0]
+    return "回覆並解決註解" if base in ("回覆註解", "已解決註解") else base
 
 
 def make_diff(before: str, after: str, max_lines: int = 400) -> str:
