@@ -8,4 +8,4 @@
 - 文章和審稿紀錄只存在那台平板的瀏覽器，不會上傳。
 - 程式在瀏覽器裡用 [Pyodide](https://pyodide.org/) 執行；第一次打開要有網路，之後沒網路也能用。
 
-這個 repo 的內容由原始碼 repo 自動產生，請不要直接修改。
+這個 repo 的內容由 Chen-MouChin/cat-health-tw-src 自動產生，請不要直接修改。
