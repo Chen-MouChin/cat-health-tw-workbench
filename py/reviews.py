@@ -76,7 +76,7 @@ REVIEW_SPEC = [
         "反白有問題的那幾個字，不要反白整段。",
         "寫出哪裡有問題，最好附上建議改法或出處。例如：「這裡寫 3 天，[2] 的摘要寫 2 天」。",
         "不能只反白、不寫字。",
-        "想補資料，只能用國際獸醫學會、大學、政府的資料，例如 ISFM、iCatCare、WSAVA、IRIS、AAFP、AAHA、Cornell、VCA、ASPCA、FDA、PubMed、台灣政府網站。商家、部落格、寵物用品網站不能用。",
+        "想補資料，只能用國際獸醫學會、大學、政府的資料，例如 ISFM、iCatCare、WSAVA、IRIS、AAFP、AAHA、Cornell、VCA、ASPCA、FDA、美國獸醫學會期刊（JAVMA、AJVR）、PubMed、台灣政府網站。商家、部落格、寵物用品網站不能用。",
         "讀起來卡、看不懂的地方，用你自己的話寫就好，不用修飾。",
     ]),
     ("不用管的", [
