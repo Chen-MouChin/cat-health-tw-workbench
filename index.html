@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta name="robots" content="noindex, nofollow">
-<script src="shim.js?v=1263396170"></script>
+<script src="shim.js?v=4f92da22fa"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貓健康站 工作檯</title>
@@ -310,6 +310,7 @@
       <span :class="{ok: lastSaved}">{{ lastSaved ? '✓ 已自動儲存・' + lastSaved.at : '做的每個動作都會自動儲存' }}</span>
       <a href="#" class="muted" @click.prevent="welcome=true">怎麼用</a>
       <button class="btn" @click="endReview" :disabled="busy">結束審稿</button>
+      <label class="btn" style="cursor:pointer" title="選另一台（平板或電腦）寄回的「審稿結果」檔，接著那邊的進度審">接續另一台<input type="file" accept=".zip" style="display:none" @change="loadPack"></label>
       <button class="btn green" @click="sendBack" :disabled="busy">寄回結果<template v-if="hp.unsent.length">（{{ hp.unsent.length }} 篇）</template></button>
     </div>
     <div class="right" v-else>
@@ -1025,7 +1026,7 @@
         <button class="btn green" style="font-size:16px; padding:10px 24px" @click="startHelper" :disabled="!nameInput.trim() || !hp.pack_id">開始審稿</button>
         <label class="btn" style="cursor:pointer">{{ hp.pack_id ? '打開新的審稿包' : '打開審稿包' }}<input type="file" accept=".zip" style="display:none" @change="loadPack"></label>
       </div>
-      <div class="muted" style="font-size:12px; margin-top:8px" v-if="hp.pack_id">收到新的審稿包時按「打開新的審稿包」，你現在的進度會先幫你保留起來。</div>
+      <div class="muted" style="font-size:12px; margin-top:8px" v-if="hp.pack_id">收到新的審稿包時按「打開新的審稿包」，你現在的進度會先幫你保留起來。<br>平板和電腦輪流審：在一台按「寄回結果」，把檔案傳給自己，到另一台按這個按鈕選那個「審稿結果」檔，就接著上次的進度。</div>
       <div class="muted" style="font-size:12px; margin-top:10px; padding-top:8px; border-top:1px solid #f0ece4">審稿程式 {{ ov.version }}・<a href="manual" target="_blank">完整使用手冊</a></div>
     </div>
   </div>
@@ -2038,6 +2039,7 @@ createApp({
       if (!r.ok) return say(r.error || '打不開這個檔案', true);
       cur.value = null;
       await loadOverview(); await loadArts();
+      if (r.continued) return say(`已接上 ${fmtDate(r.exported_at)} 在另一台寄回的進度：${r.records} 篇的審稿紀錄、${r.articles} 篇改過的文章` + (r.clashes ? `。${r.clashes} 篇兩邊改到同一段，用了匯入的版本，這台原本的進度先存了一份在「下載」：${r.kept}` : ''));
       say(`已換成 ${fmtDate(r.created_at)} 的審稿包，有 ${r.focus} 篇請你看` + (r.kept ? `。沒寄回的進度先存了一份在「下載」：${r.kept}` : ''));
     }
 

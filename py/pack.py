@@ -381,6 +381,15 @@ def read_result(data: bytes) -> tuple[dict, dict[str, str], dict[str, dict]]:
     return manifest, arts, recs
 
 
+def is_result(data: bytes) -> bool:
+    """是審稿結果（manifest.json），不是審稿包。"""
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+        return "manifest.json" in z.namelist() and json.loads(z.read("manifest.json")).get("kind") == RESULT_KIND
+    except (zipfile.BadZipFile, ValueError, KeyError):
+        return False
+
+
 def pack_members(z: zipfile.ZipFile) -> tuple[dict, str]:
     """找出審稿包裡的 pack.json，回傳 (meta, 資料夾前綴)。"""
     for name in z.namelist():
@@ -461,6 +470,11 @@ def install_pack(work: Path, src, merge) -> dict:
         if rec.pop("original_hash", None):
             rec.pop("original_at", None)
             p.write_text(json.dumps(rec, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    vers = Versions(work)                      # 審稿包的原文，接續另一台的進度時三方合併要用
+    for p in (work / "content" / "articles").glob("*.md"):
+        fm = FM_RE.match(p.read_text(encoding="utf-8"))
+        slug = (re.search(r"^slug:\s*['\"]?([A-Za-z0-9\-]+)", fm.group(2), re.M) if fm else None)
+        vers.put(slug.group(1) if slug else p.stem, p.read_text(encoding="utf-8"))
     meta["installed_at"] = now()
     (work / "pack.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
     return meta
@@ -486,7 +500,7 @@ def make_result(work: Path, records: dict[str, dict], name: str, articles: dict[
     base = meta.get("base", {})
     since = meta.get("installed_at", "")
     manifest = {"kind": RESULT_KIND, "version": 1, "pack_id": meta.get("id"), "reviewer": name,
-                "exported_at": now(), "articles": {}}
+                "exported_at": now(), "installed_at": since, "articles": {}}
     counts = {"passed": 0, "changes": 0, "comments": 0, "edits": 0, "articles": 0}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -496,7 +510,8 @@ def make_result(work: Path, records: dict[str, dict], name: str, articles: dict[
                 z.writestr(f"articles/{slug}.md", text)
                 manifest["articles"][slug] = {"base": base[slug], "changed": True}
         for slug, rec in records.items():
-            mine = [e for e in rec.get("log", []) if not e.get("remote") and e.get("at", "") >= since]
+            # 自己在另一台裝置的紀錄合併進來時標成 remote，但還是自己的進度
+            mine = [e for e in rec.get("log", []) if (not e.get("remote") or e.get("who") == name) and e.get("at", "") >= since]
             if not mine and slug not in manifest["articles"]:
                 continue
             z.writestr(f"reviews/{slug}.json", json.dumps(clean_record(rec), ensure_ascii=False, indent=1))

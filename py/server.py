@@ -84,7 +84,7 @@ HELPER_DIR = ROOT / "build" / "helper"   # 產生的審稿包與 exe（build/ �
 OWNER_NAME = "Chen-MouChin"
 # 審稿程式的版本。改了小幫手看得到的功能就加一版，並同步更新 workbench/helper/使用手冊.txt 的版本與更新紀錄
 # （test_workbench.py 會檢查兩邊一致）
-VERSION = "1.4"
+VERSION = "1.5"
 FOOTNOTE_RE = re.compile(r"\[\^([A-Za-z0-9][A-Za-z0-9_\-\.]*)\]")
 PY = sys.executable
 RESEARCH = ROOT / "research"
@@ -975,7 +975,64 @@ def helper_export(suffix: str = "") -> dict:
     return {"ok": True, "file": out.name, "path": str(out), "folder": str(out.parent), "counts": counts}
 
 
+def helper_continue(data: bytes) -> dict:
+    """小幫手在另一台裝置（平板／電腦）寄回的結果，在這台接著審：審稿紀錄合併，改過的文章套進來。
+    兩台要先打開同一個審稿包。兩邊改到同一段時用匯入的版本，這台原本的進度先存一份到「下載」。"""
+    manifest, arts, recs = pack.read_result(data)
+    if not (ROOT / "pack.json").exists():
+        raise ValueError("這台還沒有審稿包。先打開和另一台同一個審稿包，再打開審稿結果")
+    meta = json.loads((ROOT / "pack.json").read_text(encoding="utf-8"))
+    if manifest.get("pack_id") != meta.get("id"):
+        raise ValueError("這份審稿結果是另一個審稿包的。兩台要先打開同一個審稿包")
+    kept = ""
+    slugs = all_slugs()
+    who = helper_name() or pack.safe_name(str(manifest.get("reviewer") or "小幫手"))
+    ch = pack.content_hash
+    # 先看會不會有兩邊改到同一段的文章，有的話先把這台的進度存一份
+    plan = {}
+    for slug, theirs in arts.items():
+        p = slugs.get(slug)
+        if not p:
+            continue
+        cur = p.read_text(encoding="utf-8")
+        if ch(cur) == ch(theirs):
+            continue
+        base_h = str((manifest.get("articles") or {}).get(slug, {}).get("base", ""))
+        if ch(cur) == base_h:
+            plan[slug] = (cur, pack.keep_status(theirs, cur), False)
+            continue
+        chunks = _chunks(slug, cur, theirs, base_h)
+        clash = any(c["t"] == "conflict" for c in chunks)
+        picks = ["theirs"] * sum(1 for c in chunks if c["t"] == "conflict")
+        plan[slug] = (cur, pack.keep_status(pack.merged_text(chunks, picks), cur), clash)
+    if any(c for _, _, c in plan.values()):
+        kept = helper_export("-自動保留")["file"]
+    with reviews.LOCK:
+        for slug, inc in recs.items():
+            if slug in slugs:
+                local = STORE.load(slug)
+                reviews.merge_record(local, inc)
+                STORE.save(local)
+    changed = 0
+    for slug, (cur, new, clash) in plan.items():
+        res = save_raw(slug, new, text_hash(cur), who, "接續另一台的進度", gate=False,
+                       extra={"detail": "兩邊改到同一段，用匯入的版本" if clash else "套用另一台改的字"})
+        changed += bool(res.get("ok") and not res.get("unchanged"))
+    # 另一台比較早打開審稿包時，那邊的進度也算這次要寄回的
+    since = str(manifest.get("installed_at") or meta.get("created_at") or "")
+    if since and since < meta.get("installed_at", ""):
+        meta["installed_at"] = since
+        (ROOT / "pack.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8")
+    if changed:
+        _LINT_MTIME.clear()
+        build_site()
+    return {"ok": True, "continued": True, "articles": changed, "records": len(recs), "kept": kept,
+            "clashes": sum(1 for _, _, c in plan.values() if c), "exported_at": str(manifest.get("exported_at") or "")[:19]}
+
+
 def helper_load_pack(src) -> dict:
+    if isinstance(src, (bytes, bytearray)) and pack.is_result(src):
+        return helper_continue(bytes(src))
     kept = None
     if (ROOT / "pack.json").exists() and unsent_slugs():
         kept = helper_export("-自動保留")
