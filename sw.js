@@ -1,7 +1,7 @@
 // 平板版審稿的 service worker：
 // 1. 把審稿程式和 Pyodide 存進快取，第一次開過之後沒有網路也能用
 // 2. iframe 裡的網站預覽（…/site/…、…/manual）轉給頁面裡的 Python 回答
-const CACHE = 'cat-review-d0c3b6879f';
+const CACHE = 'cat-review-d5580cbd24';
 const SCOPE = new URL('./', self.location).pathname;          // /cat-health-tw-workbench/
 const PYODIDE = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
 

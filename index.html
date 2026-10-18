@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta name="robots" content="noindex, nofollow">
-<script src="shim.js?v=d0c3b6879f"></script>
+<script src="shim.js?v=d5580cbd24"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貓健康站 工作檯</title>
@@ -345,7 +345,7 @@
             <span v-for="(label, k) in ov.review.labels" :key="k" class="pill" :class="'st-'+k" style="cursor:pointer" @click="openQueue(k)">{{ label }} {{ ov.review.stages[k] || 0 }}</span>
           </div>
           <div class="bar"><i :style="{width: pct(ov.review.stages.approved||0, ov.articles.total)}"></i></div>
-          <div class="sub">已上線 {{ ov.review.stages.approved||0 }} / {{ ov.articles.total }} 篇 · 申請 AdSense 門檻 {{ ov.thresholds.reviewed }} 篇</div>
+          <div class="sub">已上線 {{ ov.review.stages.approved||0 }} / {{ ov.articles.total }} 篇</div>
         </div>
         <div class="card">
           <h3>核心 10 篇</h3>
