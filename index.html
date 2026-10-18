@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta name="robots" content="noindex, nofollow">
-<script src="shim.js?v=4f92da22fa"></script>
+<script src="shim.js?v=2d38003ffd"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貓健康站 工作檯</title>
@@ -258,6 +258,11 @@
   .check .opts button.on.ok { background:var(--green); color:#fff; border-color:var(--green); }
   .check .opts button.on.na { background:#888; color:#fff; border-color:#888; }
   .check .by { font-size:11px; color:var(--faint); }
+  .check .hint { font-size:12px; color:var(--muted, #666); margin-top:2px; }
+  .spec { margin-bottom:10px; padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:#fffdf5; }
+  .spec summary { cursor:pointer; font-weight:700; }
+  .spec h5 { margin:10px 0 4px; font-size:13px; }
+  .spec ul { margin:0; padding-left:18px; font-size:13px; line-height:1.55; }
   .decide { border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:#fcfbf8; }
   .decide .why { font-size:12px; color:var(--amber); margin-top:6px; }
   .claimbox { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 10px; border-radius:8px; background:#f6f4ee; }
@@ -557,10 +562,19 @@
             </ol>
           </div>
 
+          <details class="spec" v-if="cur.review_spec" :open="!cur.review.comments.length && !checkedCount">
+            <summary>審稿要求（開始前先看）</summary>
+            <template v-for="[h, items] in cur.review_spec" :key="h">
+              <h5>{{ h }}</h5>
+              <ul><li v-for="t in items" :key="t">{{ t }}</li></ul>
+            </template>
+          </details>
+
           <div>
             <h4>檢查清單（{{ checkedCount }}/{{ cur.checklist_def.length }}）</h4>
             <div class="check" v-for="[k, label] in cur.checklist_def" :key="k">
               <div class="lbl">{{ label }}
+                <div class="hint" v-if="cur.checklist_hint && cur.checklist_hint[k]">{{ cur.checklist_hint[k] }}</div>
                 <div class="by" v-if="cur.review.checklist[k]">{{ cur.review.checklist[k].by }} · {{ fmtAgo(cur.review.checklist[k].at) }}</div>
               </div>
               <div class="opts">
@@ -614,7 +628,7 @@
           <div class="composer" v-if="draft.open">
             <div class="quote" v-if="draft.quote">「{{ draft.quote }}」</div>
             <div v-if="draft.quote && !quoteInRaw" class="muted" style="font-size:11px; margin-bottom:6px">這段在原稿裡的格式不同（可能含粗體或註腳），建議文字之後要手動套用。</div>
-            <textarea v-model="draft.text" ref="draftBox" placeholder="哪裡有問題？例如：這個數字和文獻摘要對不上、這句太急迫"></textarea>
+            <textarea v-model="draft.text" ref="draftBox" placeholder="寫出哪裡有問題，最好附上建議改法或出處。例如：這裡寫 3 天，[2] 的摘要寫 2 天"></textarea>
             <textarea v-if="draft.quote" v-model="draft.suggestion" placeholder="建議改成（選填）：直接寫新的句子" style="margin-top:6px; min-height:50px"></textarea>
             <div style="display:flex; gap:6px; margin-top:6px">
               <button class="btn primary sm" @click="addComment" :disabled="busy || (!draft.text.trim() && !draft.suggestion.trim())">送出註解</button>
@@ -1309,7 +1323,7 @@ createApp({
       const s = [
         { label: isHelper.value ? '從左邊點開一篇' : '按「我來審這篇」', done: claimed },
         { label: '讀文章，反白有問題的地方加註解', done: claimed && (r.comments.length > 0 || listDone) },
-        { label: '對照「文獻」頁的摘要', done: chk('cites') !== '' },
+        { label: '抽 3 個數字，對照「文獻」的摘要', done: chk('cites') !== '' },
         { label: '勾完檢查清單', done: listDone },
         { label: '按「通過」或「需修改」', done: decided },
       ];

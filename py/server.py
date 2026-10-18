@@ -84,7 +84,7 @@ HELPER_DIR = ROOT / "build" / "helper"   # 產生的審稿包與 exe（build/ �
 OWNER_NAME = "Chen-MouChin"
 # 審稿程式的版本。改了小幫手看得到的功能就加一版，並同步更新 workbench/helper/使用手冊.txt 的版本與更新紀錄
 # （test_workbench.py 會檢查兩邊一致）
-VERSION = "1.5"
+VERSION = "1.6"
 FOOTNOTE_RE = re.compile(r"\[\^([A-Za-z0-9][A-Za-z0-9_\-\.]*)\]")
 PY = sys.executable
 RESEARCH = ROOT / "research"
@@ -408,6 +408,8 @@ def article_detail(slug: str) -> dict | None:
                    "can_original": rec.get("original_hash", cur_h) != cur_h and bool(VERSIONS.get(slug, rec.get("original_hash", ""))),
                    "incoming": {"who": inc["who"], "at": inc["at"], "why": inc.get("why", "")} if inc else None},
         "checklist_def": reviews.CHECKLIST,
+        "checklist_hint": reviews.CHECK_HINTS,
+        "review_spec": review_spec(),
         "gate": {"fails": len(r["fails"]), "missing_cites": missing_cites, "unapproved_cites": unapproved},
         "raw_hash": text_hash(text),
         "file": p.name, "slug": slug, "frontmatter": fm, "sources": sources,
@@ -888,6 +890,12 @@ def import_result(data: bytes) -> dict:
             pk["returns"].append({"who": who, "at": at, "done": sum(1 for r in rows if r["judgment"] != "還在看")})
     _jsave(PACKS_LOG, packs)
     return summary
+
+
+def review_spec() -> list:
+    """審稿要求，{owner} 換成負責人的名字（在家審時用審稿包裡記的名字）"""
+    owner = _jload(ROOT / "pack.json", {}).get("owner", OWNER_NAME)
+    return [[h, [t.replace("{owner}", owner) for t in items]] for h, items in reviews.REVIEW_SPEC]
 
 
 def conflict_detail(slug: str) -> dict:
