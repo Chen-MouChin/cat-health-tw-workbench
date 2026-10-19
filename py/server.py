@@ -700,7 +700,7 @@ def deploy_status() -> dict:
         stale = d["code"] == 1 if d["code"] in (0, 1) else None
     return {"ok": True, "last": last, "head": head[:7], "remote": remote[:7],
             "deployed_sha": deployed, "site_stale": stale,
-            "site": "https://chen-mouchin.github.io/cat-health-tw/"}
+            "site": "https://cathealthtw.com/"}
 
 
 

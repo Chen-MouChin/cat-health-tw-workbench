@@ -1,6 +1,6 @@
 # 貓健康站平板審稿程式
 
-[貓健康站](https://chen-mouchin.github.io/cat-health-tw/)的小幫手用 iPad 審稿的程式。
+[貓健康站](https://cathealthtw.com/)的小幫手用 iPad 審稿的程式。
 
 網址：https://chen-mouchin.github.io/cat-health-tw-workbench/
 
