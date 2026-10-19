@@ -36,9 +36,11 @@ EXE_NAME = "開始審稿.exe"
 SNAPSHOT_FILES = [
     "build.py", "scripts/lint_articles.py", "scripts/sync_cited_by.py",
     "content/references/citations.json", "content/references/glossary.json", "content/references/terms.json",
-    "data/breeds/breeds.json", "data/breeds_en.json",
+    "data/breeds/breeds.json", "data/breeds_en.json", "data/breeds/warnings.json",
     "data/vets/all_vets.json", "data/vets/taipei_newtaipei_vets.json",
+    "data/subsidy/neuter_2026.json", "content/pages/index.html", "content/pages/notice.json",
 ]
+# build.py 新增要讀的資料檔時，這裡也要加；test_workbench 的審稿包流程會在小幫手那邊真的跑一次 build.py 把關
 SNAPSHOT_GLOBS = ["content/articles/*.md", "build/drafts/articles/*.html"]
 SNAPSHOT_DIRS = ["frontend"]
 # 小幫手的工作資料夾裡，換新審稿包時要整個換掉的部分（審稿紀錄 research/ 保留）
