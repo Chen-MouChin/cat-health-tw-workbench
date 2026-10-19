@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta name="robots" content="noindex, nofollow">
-<script src="shim.js?v=a424a77737"></script>
+<script src="shim.js?v=9c11653e38"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貓健康站 工作檯</title>
@@ -323,6 +323,7 @@
       <span class="me" v-if="ov">{{ isOwner ? '網站負責人' : '審稿' }}：{{ me }} <a v-if="!isOwner" href="#" @click.prevent="askName=true" class="muted" style="font-size:11px">改名</a></span>
       <button class="btn sm" @click="refreshAll">重新整理</button>
       <a href="#" class="muted" @click.prevent="showGuide=true">說明</a>
+      <button v-if="isOwner" class="btn sm" @click="saveAndQuit" :disabled="busy" title="記下現在停在哪個分頁、哪一篇，關掉工作檯；下次打開接著做">儲存並結束</button>
     </div>
   </header>
 
@@ -1086,6 +1087,31 @@
       <h2>今天辛苦了</h2>
       <p style="font-size:16px; line-height:1.8">審稿程式已經關掉，可以關閉這個視窗。<br>下次點兩下「開始審稿」，會接著這次的進度。</p>
       <p class="muted">已看完 {{ hp.done }}／{{ hp.focus.length }} 篇</p>
+    </div>
+  </div>
+
+  <!-- 負責人：結束前還有沒 commit 或沒推送的東西 -->
+  <div class="modal-bg" v-if="askQuit">
+    <div class="modal">
+      <h2>結束前提醒</h2>
+      <p style="line-height:1.75; margin:0 0 14px">
+        <template v-if="ov.git.changed">還有 {{ ov.git.changed }} 個檔案沒 commit。</template>
+        <template v-if="ov.git.ahead">有 {{ ov.git.ahead }} 個 commit 還沒推送。</template>
+        工作進度已經記下來，直接結束也不會不見，下次打開會回到這裡。
+      </p>
+      <div style="display:flex; gap:8px; justify-content:flex-end">
+        <button class="btn" @click="askQuit=false">取消</button>
+        <button class="btn" @click="askQuit=false; go('build')">先去建置與發佈</button>
+        <button class="btn primary" @click="askQuit=false; quitOwner()">直接結束</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="bye" v-if="byeOwner">
+    <div>
+      <img src="site/favicon.svg" alt="" style="width:88px; height:88px">
+      <h2>工作檯已經關掉</h2>
+      <p style="font-size:16px; line-height:1.8">可以關閉這個分頁。<br>下次打開工作檯，會回到{{ sessionLabel || '上次的位置' }}。</p>
     </div>
   </div>
 
@@ -2044,6 +2070,55 @@ createApp({
       await api.post('/api/helper/quit').catch(() => {});
       bye.value = true;
     }
+
+    // ---- 工作階段：自動記下停在哪裡，下次打開接著做 ----
+    // 負責人存在工作檯（research/reviews/_owner_session.json），右上角「儲存並結束」關掉工作檯；
+    // 小幫手（在家審、平板、區網）存在自己的瀏覽器，每個審稿包分開記
+    const askQuit = ref(false), byeOwner = ref(false), sessionLabel = ref('');
+    let sessionReady = false, sessionTimer = 0;
+    const sessionData = () => ({ tab: tab.value, slug: cur.value ? cur.value.slug : '', stab: stab.value,
+      fq: fq.value, fc: fc.value, fs: fs.value, cs: cs.value, cq: cq.value });
+    function labelOf(d) {
+      const t = (tabs.value.find(x => x.id === d.tab) || {}).label || '';
+      return d.tab === 'review' && d.slug ? `「${titleOf(d.slug)}」` : (t ? `「${t}」分頁` : '');
+    }
+    const sessionKey = () => 'wb_session_' + (isHelper.value ? 'helper_' + (hp.value.pack_id || '') : 'reviewer');
+    async function saveSession() {
+      if (!sessionReady) return;
+      clearTimeout(sessionTimer);
+      if (isOwner.value) await api.post('/api/session', sessionData());
+      else store.set(sessionKey(), JSON.stringify({ ...sessionData(), at: new Date().toISOString() }));
+    }
+    watch(() => JSON.stringify(sessionData()), () => {
+      if (!sessionReady) return;
+      clearTimeout(sessionTimer); sessionTimer = setTimeout(saveSession, 1500);
+    });
+    async function restoreSession() {
+      let d = null;
+      if (isOwner.value) d = await api.get('/api/session');
+      else { try { d = JSON.parse(store.get(sessionKey()) || 'null'); } catch (e) { d = null; } }
+      if (!d || d.error || !d.tab || !tabs.value.some(t => t.id === d.tab)) return null;
+      if (d.slug && !arts.value.some(a => a.slug === d.slug)) d.slug = '';
+      for (const [k, r] of [['fq', fq], ['fc', fc], ['fs', fs], ['cs', cs], ['cq', cq]]) if (typeof d[k] === 'string') r.value = d[k];
+      if (d.stab) stab.value = d.stab;
+      tab.value = d.tab;
+      return d;
+    }
+    async function saveAndQuit() {
+      if (view.value === 'edit' && rawContent.value !== rawOrig.value) return say('編輯的內容還沒儲存：先按「儲存」（Ctrl+S），或切回閱讀放棄修改', true);
+      await saveSession();
+      sessionLabel.value = labelOf(sessionData());
+      await loadOverview();
+      if (ov.value && (ov.value.git.changed || ov.value.git.ahead)) askQuit.value = true;
+      else quitOwner();
+    }
+    async function quitOwner() {
+      await saveSession();
+      sessionLabel.value = labelOf(sessionData());
+      const r = await api.post('/api/quit');
+      if (r && r.error) return say(r.error, true);
+      byeOwner.value = true;
+    }
     async function loadPack(e) {
       const file = e.target.files[0]; e.target.value = '';
       if (!file) return;
@@ -2085,10 +2160,15 @@ createApp({
       if (['build', 'helper'].includes(tab.value) && !isOwner.value) tab.value = isHelper.value ? 'review' : 'dash';
       if (isOwner.value) loadHelper();
       fq.value = isOwner.value && ov.value.review.waiting.length ? 'passed' : 'mine';
+      // 網址沒指定分頁時，回到上次停的位置（負責人、小幫手都一樣）
       await loadArts();
+      const last = !hashTab && !welcome.value ? await restoreSession() : null;
       go(tab.value);
       if (hashSlug && tab.value === 'review') { fq.value = 'all'; open(hashSlug); }
+      else if (last && last.tab === 'review' && last.slug) { await open(last.slug); say('接著上次的進度：' + labelOf(last)); }
+      else if (last && last.tab !== 'dash') say('接著上次的進度：' + labelOf(last));
       else if (isHelper.value && hp.value.focus.length && !welcome.value) open(hp.value.focus[0]);
+      sessionReady = true;
       document.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === 's' && view.value === 'edit') { e.preventDefault(); if (rawContent.value !== rawOrig.value && !busy.value) saveEdit(); return; }
         if (view.value === 'edit') return;
@@ -2110,6 +2190,7 @@ createApp({
       loadCites, loadGit, loadDeploy, refreshAll, open, openReview, openQueue, go, setView, saveEdit, claim, release, setCheck, setStage, approve, ownerReject, archive,
       startComment, closeDraft, addComment, sendReply, resolve, delComment, applySugg, focusQuote, onIframeLoad, citeSet, citeSave, citeDirty, verify, goCite, togglePriority, dragSlug, dragStart, nudgePriority, starToggle, coreToggle, rate, sortByRating,
       runBuild, runLint, commit, push, runDeploy, saveName, closeGuide, count,
+      askQuit, byeOwner, sessionLabel, saveAndQuit, quitOwner,
       isHelper, hp, welcome, sent, askEnd, ending, bye, restoreAsk, helperInfo, packSel, packFull, packComments, packMsg, importRes, dropOver, conflict, choices,
       askRestore, doRestore, fmtDate, loadHelper, packOrder, pickPack, makePack, isIncoming, pickResult, dropResult, openConflict, resolveConflict, discardConflict, markDiff,
       helperLabel, listGroups, navList, lastSaved, startHelper, sendBack, openFolder, endReview, quitHelper, loadPack,

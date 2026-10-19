@@ -84,7 +84,7 @@ HELPER_DIR = ROOT / "build" / "helper"   # 產生的審稿包與 exe（build/ �
 OWNER_NAME = "Chen-MouChin"
 # 審稿程式的版本。改了小幫手看得到的功能就加一版，並同步更新 workbench/helper/使用手冊.txt 的版本與更新紀錄
 # （test_workbench.py 會檢查兩邊一致）
-VERSION = "1.6"
+VERSION = "1.7"
 FOOTNOTE_RE = re.compile(r"\[\^([A-Za-z0-9][A-Za-z0-9_\-\.]*)\]")
 PY = sys.executable
 RESEARCH = ROOT / "research"
@@ -631,7 +631,9 @@ def overview() -> dict:
                       "abstract_zh": sum(1 for v in items if v.get("abstract_zh")),
                       "url_verified": sum(1 for v in items if v.get("url_verified")),
                       "cited": sum(1 for v in items if v.get("cited_by"))},
-        "git": {"changed": len(changed), "branch": "" if HELPER else run(["git", "branch", "--show-current"], 30)["stdout"].strip()},
+        "git": {"changed": len(changed), "branch": "" if HELPER else run(["git", "branch", "--show-current"], 30)["stdout"].strip(),
+                # 還沒推上去的 commit 數（沒有上游時是 0）；「儲存並結束」前提醒用
+                "ahead": 0 if HELPER else int((run(["git", "rev-list", "--count", "@{u}..HEAD"], 30)["stdout"].strip() or "0").split()[0] or 0)},
         "built_at": built,
         "thresholds": {"reviewed": 30, "approved": 40, "url_verified_pct": 90, "abstract_zh_pct": 80},
     }
@@ -1074,7 +1076,10 @@ def open_app_window(url: str) -> None:
 
 # 區網模式的設定，main() 啟動時填入
 ACCESS = {"token": "", "hosts": set()}
-OWNER_ONLY = ("/api/git/commit", "/api/git/push", "/api/deploy")
+OWNER_ONLY = ("/api/git/commit", "/api/git/push", "/api/deploy", "/api/session", "/api/quit")
+# 負責人的工作階段：停在哪個分頁、哪一篇、篩選條件；下次打開工作檯接著做（research/ 不進 git）
+SESSION_FILE = RESEARCH / "reviews" / "_owner_session.json"
+OWNER_STATE = {"servers": []}   # 「儲存並結束」要關掉的 server（本機與區網）
 
 
 def client_role(ip: str, cookie_header: str, query_token: str) -> str:
@@ -1375,6 +1380,10 @@ class Handler(SimpleHTTPRequestHandler):
                                    "helper": helper_info() if HELPER else None})
             if path.startswith("/api/helper/"):
                 return self._helper_get(path)
+            if path == "/api/session":
+                if self.role != "owner":
+                    return self._json({})
+                return self._json(_jload(SESSION_FILE, {}))
             if path == "/api/activity":
                 return self._json(STORE.activity())
             if path == "/api/deploy/status":
@@ -1495,6 +1504,16 @@ class Handler(SimpleHTTPRequestHandler):
             if path.startswith("/api/helper/"):
                 return self._helper_post(path)
             body = self._body()
+            if path == "/api/session":
+                keep = {k: body.get(k) for k in ("tab", "slug", "view", "stab", "fq", "fc", "fs", "cs", "cq") if k in body}
+                keep["at"] = reviews.now()
+                _jsave(SESSION_FILE, keep)
+                return self._json({"ok": True, "at": keep["at"]})
+            if path == "/api/quit":
+                # 儲存並結束：回應送出後才關，畫面才收得到「已結束」
+                self._json({"ok": True})
+                threading.Timer(0.5, lambda: [x.shutdown() for x in OWNER_STATE["servers"]]).start()
+                return
             m_res = re.match(r"^/api/articles/([A-Za-z0-9\-]+)/restore$", path)
             if m_res:
                 res = restore(m_res.group(1), body.get("mode", ""), self.who)
@@ -1747,8 +1766,9 @@ def main() -> int:
             return 0
         print(f"port {args.port} 被占用：工作檯可能已經在跑，或換 --port")
         return 2
-    print(f"貓健康站 工作檯 → {url}   (Ctrl+C 停止)")
+    print(f"貓健康站 工作檯 → {url}   (Ctrl+C 停止，或按工作檯右上角「儲存並結束」)")
     servers = [srv]
+    OWNER_STATE["servers"] = servers
     if args.lan:
         # 區網：https，只綁區網 IP；同一個 port，位址不同不衝突
         ip = lan_ip()
