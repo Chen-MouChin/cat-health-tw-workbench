@@ -2,13 +2,15 @@
 <html lang="zh-TW">
 <head>
 <meta name="robots" content="noindex, nofollow">
-<script src="shim.js?v=39bd3661ac"></script>
+<script src="shim.js?v=e710966db3"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貓健康站 工作檯</title>
 <link rel="icon" href="site/favicon.svg">
 <!-- Vue 3.4.21（MIT），放在 workbench/vendor/，integrity 與 cdnjs 原檔相同 -->
 <script src="vendor/vue.global.prod.min.js" integrity="sha384-wdamyDHEiblYHsu/XTokGtIeFekZu7xN37Yvkl0NZ7PnhwRB+nwE1ByT7VlwiypE"></script>
+<!-- qrcode-generator 1.4.4（MIT），平板連線的 QR code 用 -->
+<script src="vendor/qrcode.min.js" integrity="sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1"></script>
 <style>
   :root { --bg:#f9f6f0; --card:#fff; --text:#1d1d1f; --muted:#6e6e73; --faint:#a1a1a6; --border:#e8e4db; --gold:#b8860b; --green:#3b6a50; --green-bg:#e8f3ea; --red:#b04a3a; --amber:#8a7340; --amber-bg:#f5f0e8; --blue:#2d4a8a; --blue-bg:#e9eef8; --hl:#fff1b8; }
   * { box-sizing:border-box; }
@@ -70,6 +72,12 @@
   button.btn:hover, a.btn:hover { background:#f3efe6; }
   button.btn.primary { background:var(--text); color:#fff; border-color:var(--text); }
   button.btn.green { background:var(--green); color:#fff; border-color:var(--green); }
+  .notice { background:#f6ecd2; color:#735f33; padding:10px 16px; font-size:14px; border-bottom:1px solid #e8dcb8; }
+  .notice.ok { background:#e6efe6; color:#2f4a34; border-color:#cfdccf; }
+  .lan-qr { display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap; }
+  .lan-qr .qr { width:200px; height:200px; background:#fff; padding:8px; border:1px solid var(--line, #ddd); border-radius:8px; }
+  .lan-qr .qr svg { width:100%; height:100%; display:block; }
+  .lan-url { font-family:ui-monospace,monospace; font-size:14px; word-break:break-all; background:#f6f4ef; padding:8px 10px; border-radius:6px; user-select:all; }
   button.btn.gold { background:var(--gold); color:#fff; border-color:var(--gold); }
   button.btn.danger { color:var(--red); }
   button.btn.sm, a.btn.sm { padding:2px 8px; font-size:12px; }
@@ -308,15 +316,16 @@
     <div class="hbar" v-if="isHelper && hp">
       <span class="prog">{{ me }}・已看完 {{ hp.done }}／{{ hp.focus.length }} 篇</span>
     </div>
-    <nav class="tabs" v-else>
+    <nav class="tabs">
       <button v-for="t in tabs" :key="t.id" :class="{on: tab===t.id}" @click="go(t.id)">{{ t.label }}<span v-if="t.badge" class="badge">{{ t.badge }}</span></button>
     </nav>
     <div class="right" v-if="isHelper && hp">
       <span :class="{ok: lastSaved}">{{ lastSaved ? '✓ 已自動儲存・' + lastSaved.at : '做的每個動作都會自動儲存' }}</span>
       <a href="#" class="muted" @click.prevent="welcome=true">怎麼用</a>
-      <button class="btn" @click="endReview" :disabled="busy">結束審稿</button>
-      <label class="btn" style="cursor:pointer" title="選另一台（平板或電腦）寄回的「審稿結果」檔，接著那邊的進度審">接續另一台<input type="file" accept=".zip" style="display:none" @change="loadPack"></label>
-      <button class="btn green" @click="sendBack" :disabled="busy">寄回結果<template v-if="hp.unsent.length">（{{ hp.unsent.length }} 篇）</template></button>
+      <button v-if="ov.caps && ov.caps.lan" class="btn" :class="{green: hp.lan}" @click="openLan" title="同一個 Wi-Fi 的平板連到這台電腦，兩台看同一份進度">{{ hp.lan ? '平板連線中' : '平板連線' }}</button>
+      <button v-if="ov.local !== false" class="btn" @click="endReview" :disabled="busy">結束審稿</button>
+      <label v-if="ov.local !== false" class="btn" style="cursor:pointer" title="選另一台（平板或電腦）寄回的「審稿結果」檔，接著那邊的進度審">接續另一台<input type="file" accept=".zip" style="display:none" @change="loadPack"></label>
+      <button v-if="ov.local !== false" class="btn green" @click="sendBack" :disabled="busy">寄回結果<template v-if="hp.unsent.length">（{{ hp.unsent.length }} 篇）</template></button>
     </div>
     <div class="right" v-else>
       <span v-if="ov && isOwner">未 commit {{ ov.git.changed }} 檔 · 上次 build {{ fmtTime(ov.built_at) }}</span>
@@ -327,7 +336,10 @@
     </div>
   </header>
 
-  <div v-if="ov && ov.code_stale" style="background:#f6ecd2; color:#735f33; padding:10px 16px; font-size:14px; border-bottom:1px solid #e8dcb8">工作檯的程式更新過了，但現在跑的還是舊版。關掉工作檯的黑色視窗，再點兩下桌面捷徑重開，新功能才會生效。</div>
+  <div v-if="ov && ov.code_stale && !isHelper" style="background:#f6ecd2; color:#735f33; padding:10px 16px; font-size:14px; border-bottom:1px solid #e8dcb8">工作檯的程式更新過了，但現在跑的還是舊版。關掉工作檯的黑色視窗，再點兩下桌面捷徑重開，新功能才會生效。</div>
+  <div v-if="hp && hp.app_fallback" class="notice">{{ hp.app_fallback }}。現在用的是開始審稿.exe 內建的 {{ ov.version }} 版，請跟 {{ hp.owner }} 要「完整版」審稿包（含新的開始審稿.exe）。</div>
+  <div v-if="hp && hp.older_pack" class="notice">你點開的審稿包（{{ fmtTime(hp.older_pack).slice(5, 16) }}）比現在用的舊，所以沒有換過去，繼續用 {{ fmtTime(hp.created_at).slice(5, 16) }} 的審稿包。舊的資料夾可以刪掉。</div>
+  <div v-if="hp && ov.local === false" class="notice ok">平板連線中：這裡看到的是電腦上的審稿進度，兩邊改的都存在電腦裡。寄回結果請在電腦上按。</div>
   <main>
     <!-- 儀表板 -->
     <section v-if="tab==='dash'">
@@ -354,7 +366,7 @@
           <div class="bar"><i :style="{width: pct(ov.articles.core_reviewed, ov.articles.core_total)}"></i></div>
           <div class="sub">優先審這幾篇，清單上標「核心」</div>
         </div>
-        <div class="card" v-if="isOwner">
+        <div class="card">
           <h3>上線 blocker：已上線文章引用、尚未核准的文獻</h3>
           <div class="big" :class="ov.blockers.length ? 'fail' : 'ok'">{{ ov.blockers.length }}</div>
           <div class="sub" v-if="ov.blockers.length">
@@ -377,7 +389,7 @@
         <div class="card">
           <h3>怎麼審一篇</h3>
           <ol style="margin:0; padding-left:18px; line-height:1.9">
-            <li>到「文章審核」，清單預設只列可以審的文章。點一篇，按<b>「我來審這篇」</b>，別人就知道你在審。</li>
+            <li v-if="isHelper">到「文章審核」，「這次請你看的」排在最前面，點一篇就開始。</li><li v-else>到「文章審核」，清單預設只列可以審的文章。點一篇，按<b>「我來審這篇」</b>，別人就知道你在審。</li>
             <li>讀左邊的文章。覺得哪裡怪，<b>反白那段文字</b>，按「加註解」。想直接改字，就在「建議改成」寫新的句子。</li>
             <li>右邊「文獻」頁可以對照每個註腳的原文摘要。</li>
             <li>回到「審稿」頁，把檢查清單一項一項勾完。</li>
@@ -385,7 +397,7 @@
           </ol>
         </div>
       </div>
-      <div class="cards" style="margin-top:12px" v-if="ov && isOwner">
+      <div class="cards" style="margin-top:12px" v-if="ov">
         <div class="card">
           <h3>寫作規範 lint</h3>
           <div class="big" :class="ov.articles.fails? 'fail':'ok'">{{ ov.articles.fails }} FAIL</div>
@@ -403,7 +415,7 @@
     <!-- 文章審核 -->
     <section v-if="tab==='review'" class="review">
       <div class="col">
-        <div class="queue" v-if="!isHelper">
+        <div class="queue">
           <button v-for="q in queues" :key="q.id" :class="{on: fq===q.id}" @click="fq=q.id">{{ q.label }} {{ q.n }}</button>
         </div>
         <div class="toolbar" style="padding:0 12px; margin-bottom:6px">
@@ -411,12 +423,12 @@
           <button v-if="isOwner" type="button" class="btn sm" @click="sortByRating" :disabled="busy" title="把評過 A、B 級、還沒上線的文章依分數排成優先清單">照評級排序</button>
           <select v-model="fc"><option value="">全部分類</option><option v-for="c in categories" :value="c">{{ c }}</option></select>
         </div>
-        <div class="muted" style="padding:0 12px 8px; font-size:11px">{{ isHelper ? navList.length : filtered.length }} 篇 · <kbd>n</kbd>/<kbd>p</kbd> 上下篇</div>
+        <div class="muted" style="padding:0 12px 8px; font-size:11px">{{ navList.length }} 篇 · <kbd>n</kbd>/<kbd>p</kbd> 上下篇</div>
         <template v-for="g in listGroups" :key="g.label">
         <div class="grp" v-if="g.label">{{ g.label }} {{ g.items.length }}</div>
         <div v-for="a in g.items" :key="a.slug" class="list-item" :data-slug="a.slug" :class="{sel: cur && cur.slug===a.slug, dragging: dragSlug===a.slug}" @click="open(a.slug)">
           <div class="t"><button v-if="isOwner" type="button" class="star" :class="{on: a.priority}" :title="a.priority ? '取消優先' : '設為優先審'" :aria-label="a.priority ? '取消優先' : '設為優先審'" :aria-pressed="a.priority ? 'true' : 'false'" @click.stop="starToggle(a)">{{ a.priority ? '★' : '☆' }}</button><span v-if="a.priority && isOwner" class="drag" role="button" tabindex="0" title="拖曳或用 ↑↓ 調整優先順序" aria-label="調整優先順序"
-                @pointerdown.stop.prevent="dragStart($event, a)" @click.stop @keydown.up.stop.prevent="nudgePriority(a, -1)" @keydown.down.stop.prevent="nudgePriority(a, 1)">≡</span><span v-if="a.priority && !isHelper" class="tag-prio">優先 {{ a.priority }}</span> <span v-if="a.core && !isHelper" class="tag-core">核心</span> <span v-if="a.rating_level" class="tag-lv" :class="'lv-' + a.rating_level" :title="'評級 ' + a.rating_level + '（' + a.rating_score + ' / 9 分）'">{{ a.rating_level }}</span> {{ a.title }}</div>
+                @pointerdown.stop.prevent="dragStart($event, a)" @click.stop @keydown.up.stop.prevent="nudgePriority(a, -1)" @keydown.down.stop.prevent="nudgePriority(a, 1)">≡</span><span v-if="a.priority" class="tag-prio">優先 {{ a.priority }}</span> <span v-if="a.core" class="tag-core">核心</span> <span v-if="a.rating_level" class="tag-lv" :class="'lv-' + a.rating_level" :title="'評級 ' + a.rating_level + '（' + a.rating_score + ' / 9 分）'">{{ a.rating_level }}</span> {{ a.title }}</div>
           <div class="m">
             <span class="pill" :class="'st-'+a.stage" v-if="isHelper">{{ cur && cur.slug===a.slug ? '正在看' : helperLabel(a) }}</span>
             <span class="pill" :class="'st-'+a.stage" v-else>{{ a.stage_label }}<template v-if="a.claimed_by">・{{ a.claimed_by }}</template></span>
@@ -682,8 +694,8 @@
               <a :href="c.url" target="_blank" rel="noopener" class="btn sm primary" style="color:#fff">開啟原文 ↗</a>
               <label style="font-size:12px; cursor:pointer"><input type="checkbox" :checked="c.url_verified" @change="citeSet(c.key, {url_verified: $event.target.checked})"> 我開過原文，網址有效</label>
             </div>
-            <div v-if="c.found && isOwner" style="margin-top:8px; display:flex; gap:6px">
-              <button class="btn sm" @click="citeSet(c.key,{status:'approved', url_verified:true})" :disabled="c.status==='approved'">核准這筆文獻</button>
+            <div v-if="c.found" style="margin-top:8px; display:flex; gap:6px">
+              <button v-if="isOwner" class="btn sm" @click="citeSet(c.key,{status:'approved', url_verified:true})" :disabled="c.status==='approved'">核准這筆文獻</button>
               <button class="btn sm" @click="goCite(c.key)">編輯文獻</button>
             </div>
           </div>
@@ -740,7 +752,7 @@
         <label><input type="checkbox" v-model="onlyCited"> 只看被引用的</label>
         <input v-model="cq" placeholder="搜尋 key / 標題" style="width:200px">
         <span class="muted">{{ citesFiltered.length }} 筆</span>
-        <span class="muted" v-if="!isOwner" style="font-size:12px">你可以核對原文、修中文摘要；核准由網站負責人按。</span>
+        <span class="muted" v-if="!isOwner" style="font-size:12px">你可以核對原文、修中文摘要<template v-if="isHelper">（寄回時會一起帶回去）</template>；核准由網站負責人按。</span>
       </div>
       <div class="card cite-card" v-for="c in citesFiltered" :key="c.key" :class="c._flash" style="margin-bottom:10px">
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
@@ -751,7 +763,7 @@
           <a v-if="c.pdf_url" :href="c.pdf_url" target="_blank" rel="noopener" style="font-size:12px">PDF ↗</a>
           <label style="font-size:12px"><input type="checkbox" v-model="c.url_verified"> 網址已驗證</label>
           <span style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center">
-            <button class="btn" @click="verify(c)" :disabled="c._v && c._v.running" v-if="isOwner" title="到原文找摘要裡的每個數字">
+            <button class="btn" @click="verify(c)" :disabled="c._v && c._v.running" v-if="ov.caps ? ov.caps.verify : isOwner" title="到原文找摘要裡的每個數字">
               <span class="spin" v-if="c._v && c._v.running"></span>{{ c._v && c._v.running ? '核對中…' : (c._v && c._v.res ? '重新核對數字' : '核對摘要數字') }}
             </button>
             <button class="btn" :class="{ dirty: citeDirty(c) && c._save !== 'saving', done: c._save === 'saved' && !citeDirty(c) }"
@@ -878,7 +890,8 @@
           <h4>2　小幫手電腦上有審稿程式了嗎</h4>
           <div class="kinds">
             <label class="kind" :class="{on: packFull}"><input type="radio" :value="true" v-model="packFull"><span><b>第一次給：完整版</b><br><span class="muted" style="font-size:12px">含「開始審稿」程式，約 {{ helperInfo && helperInfo.exe.size ? Math.round(helperInfo.exe.size / 1048576 + 3) : 31 }} MB<template v-if="helperInfo && !helperInfo.exe.fresh">。程式要先打包，第一次約 1 分鐘</template></span></span></label>
-            <label class="kind" :class="{on: !packFull}"><input type="radio" :value="false" v-model="packFull"><span><b>已經有了，或用平板：只給文章</b><br><span class="muted" style="font-size:12px">小幫手在程式裡按「打開新的審稿包」載入，約 3 MB</span></span></label>
+            <label class="kind" :class="{on: !packFull}"><input type="radio" :value="false" v-model="packFull"><span><b>已經有了，或用平板：只給文章</b><br><span class="muted" style="font-size:12px">小幫手在程式裡按「打開新的審稿包」載入，約 3 MB。審稿程式也會跟著更新到 {{ helperInfo ? helperInfo.version : '' }}</span></span></label>
+            <div v-if="helperInfo && helperInfo.needs_full && !packFull" class="fail" style="font-size:12px; margin:4px 0 8px">小幫手電腦上的開始審稿.exe 是 1.7 以前的舊版，只給文章的審稿包不會幫它更新程式。這次請給「完整版」，之後就能只給文章。</div>
           </div>
           <p class="muted" style="font-size:12px; margin:8px 0 0; line-height:1.7">用 iPad 審稿：選「只給文章」，請小幫手用 Safari 打開 <b>https://chen-mouchin.github.io/cat-health-tw-workbench/</b>，再選這個審稿包。文章只存在平板上；第一次開要有網路，之後沒網路也能用。</p>
           <label style="display:flex; gap:8px; align-items:center; margin-top:10px; font-size:13px"><input type="checkbox" v-model="packComments" style="width:17px; height:17px; accent-color:var(--green)"> 附上目前的註解和審稿紀錄，小幫手看得到你和其他人寫過的</label>
@@ -902,7 +915,29 @@
                 <span class="muted">{{ r.judgment }}<template v-if="r.comments">・{{ r.comments }} 則註解</template></span>
                 <span class="r" :class="{conflict: r.kind==='conflict'}">{{ r.result }}<a v-if="r.kind==='conflict' && isIncoming(r.slug)" href="#" style="margin-left:8px" @click.prevent="openConflict(r.slug)">選版本</a></span>
               </div>
+              <div class="irow" v-for="c in (importRes.cites || [])" :key="'c-' + c.key">
+                <a href="#" @click.prevent="goCite(c.key)" style="font-family:ui-monospace,monospace; font-size:12px">{{ c.key }}</a>
+                <span class="muted">文獻</span>
+                <span class="r" :class="{conflict: c.kind==='conflict'}">{{ c.result }}</span>
+              </div>
+              <div class="muted" style="font-size:12px; margin-top:6px">{{ importRes.who }} 用的審稿程式：{{ importRes.app_version }}<template v-if="importRes.launcher">（外殼 {{ importRes.launcher }}）</template></div>
               <div v-if="importRes.build_ok === false" class="fail" style="font-size:12px; margin-top:6px">預覽重建失敗，到「建置與發佈」重建一次</div>
+            </div>
+          </div>
+          <div class="card" v-if="helperInfo && helperInfo.cite_incoming && helperInfo.cite_incoming.length">
+            <h3>文獻：兩邊都改過，等你選</h3>
+            <div v-for="c in helperInfo.cite_incoming" :key="c.key" style="border-top:1px solid #f0ece4; padding:8px 0">
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+                <a href="#" @click.prevent="goCite(c.key)" style="font-family:ui-monospace,monospace; font-size:12px">{{ c.key }}</a>
+                <span class="muted" style="font-size:12px">{{ c.who }} {{ fmtTime(c.at).slice(5, 16) }}</span>
+                <button class="btn sm gold" @click="takeCite(c.key, 'theirs')">用 {{ c.who }} 的</button>
+                <button class="btn sm" @click="takeCite(c.key, 'mine')">保留我的</button>
+              </div>
+              <details style="margin-top:4px"><summary class="muted" style="font-size:12px">看 {{ c.who }} 改的內容</summary>
+                <div style="font-size:13px; white-space:pre-wrap; margin-top:4px"><b>中文標題</b>　{{ c.title_zh }}</div>
+                <div style="font-size:13px; white-space:pre-wrap; margin-top:4px"><b>摘要</b>　{{ c.abstract_zh }}</div>
+                <div style="font-size:13px; white-space:pre-wrap; margin-top:4px" v-if="c.notes"><b>備註</b>　{{ c.notes }}</div>
+              </details>
             </div>
           </div>
           <div class="card" v-if="helperInfo && helperInfo.incoming.length">
@@ -1041,8 +1076,40 @@
         <button class="btn green" style="font-size:16px; padding:10px 24px" @click="startHelper" :disabled="!nameInput.trim() || !hp.pack_id">開始審稿</button>
         <label class="btn" style="cursor:pointer">{{ hp.pack_id ? '打開新的審稿包' : '打開審稿包' }}<input type="file" accept=".zip" style="display:none" @change="loadPack"></label>
       </div>
-      <div class="muted" style="font-size:12px; margin-top:8px" v-if="hp.pack_id">收到新的審稿包時按「打開新的審稿包」，你現在的進度會先幫你保留起來。<br>平板和電腦輪流審：在一台按「寄回結果」，把檔案傳給自己，到另一台按這個按鈕選那個「審稿結果」檔，就接著上次的進度。</div>
-      <div class="muted" style="font-size:12px; margin-top:10px; padding-top:8px; border-top:1px solid #f0ece4">審稿程式 {{ ov.version }}・<a href="manual" target="_blank">完整使用手冊</a></div>
+      <div class="muted" style="font-size:12px; margin-top:8px" v-if="hp.pack_id">收到新的審稿包時按「打開新的審稿包」，你現在的進度會先幫你保留起來。<br>平板和電腦在同一個 Wi-Fi：在電腦上按右上角「平板連線」，平板掃 QR code 就能看同一份進度。<br>不在同一個網路時輪流審：在一台按「寄回結果」，把檔案傳給自己，到另一台按這個按鈕選那個「審稿結果」檔，就接著上次的進度。</div>
+      <div class="muted" style="font-size:12px; margin-top:10px; padding-top:8px; border-top:1px solid #f0ece4">審稿程式 {{ ov.version }}<template v-if="hp.launcher">（開始審稿.exe 外殼 {{ hp.launcher }}）</template>・<a href="manual" target="_blank">完整使用手冊</a></div>
+    </div>
+  </div>
+
+  <!-- 小幫手：平板連線（同一個 Wi-Fi 的平板連到這台電腦） -->
+  <div class="modal-bg" v-if="lan && lan.open" @click.self="lan.open=false">
+    <div class="modal" style="max-width:640px">
+      <h2>平板連到這台電腦</h2>
+      <p style="margin:0 0 10px; line-height:1.7">平板和這台電腦連同一個 Wi-Fi 時，平板用 Safari 打開下面的網址，就會看到這台電腦上的審稿進度。兩邊改的都存在這台電腦，不用來回寄檔。</p>
+      <template v-if="lan.on">
+        <div class="lan-qr">
+          <div class="qr" v-if="lan.qr" v-html="lan.qr" aria-label="網址的 QR code"></div>
+          <div style="flex:1; min-width:240px">
+            <ol style="margin:0 0 10px; padding-left:18px; line-height:1.8">
+              <li>用平板的相機掃左邊的 QR code，或在 Safari 輸入下面的網址。</li>
+              <li>出現「此連線不是私人連線」時，按「顯示詳細資訊」，再按「造訪此網站」。這是因為這台電腦自己簽的憑證，資料一樣有加密。</li>
+              <li>開過一次之後，平板會記住，下次打開同一個網址就好。</li>
+            </ol>
+            <div class="lan-url">{{ lan.url }}</div>
+            <div class="muted" style="font-size:11px; margin-top:6px; word-break:break-all">憑證指紋 {{ lan.fp }}</div>
+          </div>
+        </div>
+        <p class="muted" style="font-size:13px; margin:12px 0 0">網址裡有通行碼，只傳給自己的平板。這台電腦的審稿程式關掉，或按「停止連線」，平板就連不進來；下次開啟會換新的通行碼。寄回結果請在這台電腦上按。</p>
+      </template>
+      <template v-else>
+        <p class="muted" style="font-size:13px; margin:0">按「開始連線」後，Windows 可能會問要不要允許「開始審稿」使用網路：勾<b>「私人網路」</b>，再按「允許」。家裡的 Wi-Fi 被設成「公用網路」時平板會連不到，要到 Windows 的 Wi-Fi 設定改成「私人網路」。</p>
+      </template>
+      <div v-if="lan.error" class="fail" style="margin-top:10px; font-size:13px">{{ lan.error }}</div>
+      <div style="display:flex; gap:10px; margin-top:14px">
+        <button v-if="!lan.on" class="btn green" @click="lanToggle(true)" :disabled="lanBusy">{{ lanBusy ? '開啟中…' : '開始連線' }}</button>
+        <button v-else class="btn" @click="lanToggle(false)" :disabled="lanBusy">停止連線</button>
+        <button class="btn" @click="lan.open=false">關閉</button>
+      </div>
     </div>
   </div>
 
@@ -1055,6 +1122,7 @@
         <div><b>{{ sent.counts.changes }}</b>篇需修改</div>
         <div><b>{{ sent.counts.comments }}</b>則註解</div>
         <div><b>{{ sent.counts.edits }}</b>次直接改字</div>
+        <div v-if="sent.counts.citations"><b>{{ sent.counts.citations }}</b>筆文獻修改</div>
       </div>
       <div class="okbox" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
         <span style="flex:1">已經存好了：<b>{{ sent.file }}</b><br>在你電腦的「下載」資料夾</span>
@@ -1311,7 +1379,10 @@ createApp({
         { id: 'approved', label: '已上線', st: ['approved'] },
         { id: 'all', label: '全部', st: ['todo', 'claimed', 'changes', 'passed', 'approved'] },
       ];
-      return q.map(x => ({ ...x, n: count(x.st) }));
+      const out = q.map(x => ({ ...x, n: count(x.st) }));
+      // 小幫手：最前面多一個「這次請你看的」（審稿包勾選的文章排前面，其他有空再看）
+      if (isHelper.value) out.unshift({ id: 'focus', label: '這次請你看的', st: [], n: hp.value.focus.length });
+      return out;
     });
     const STAGE_ORDER = { claimed: 0, changes: 1, todo: 2, passed: 3, approved: 4 };
     const filtered = computed(() => {
@@ -1978,6 +2049,12 @@ createApp({
     // ---- 小幫手（負責人這邊）----
     const fmtDate = (s) => s ? `${+s.slice(5, 7)} 月 ${+s.slice(8, 10)} 日` : '';
     async function loadHelper() { const r = await api.get('/api/helper/packs'); if (!r.error) helperInfo.value = r; }
+    async function takeCite(key, use) {
+      const r = await api.post('/api/helper/cite', { key, use });
+      if (!r.ok) return say(r.error || '沒有存成功', true);
+      say(use === 'theirs' ? '已用小幫手改的版本' : '保留你的版本');
+      await loadHelper(); if (typeof loadCites === 'function') loadCites();
+    }
     const packOrder = computed(() => arts.value.slice().sort((a, b) => ((a.priority || 999) - (b.priority || 999)) || (STAGE_ORDER[a.stage] - STAGE_ORDER[b.stage]) || (b.core - a.core) || a.file.localeCompare(b.file)));
     function pickPack(kind) {
       const pick = { todo: (a) => ['todo', 'claimed'].includes(a.stage), changes: (a) => a.stage === 'changes', core: (a) => a.core }[kind];
@@ -2038,7 +2115,7 @@ createApp({
     // ---- 小幫手電腦上的審稿程式 ----
     const helperLabel = (a) => ({ todo: '還沒看', claimed: '還沒看', changes: '看完了・需修改', passed: '看完了・通過', approved: '已上線' }[a.stage] || a.stage_label);
     const listGroups = computed(() => {
-      if (!isHelper.value) return [{ label: '', items: filtered.value }];
+      if (!isHelper.value || fq.value !== 'focus') return [{ label: '', items: filtered.value }];
       const focus = hp.value.focus, ok = (a) => (!fs.value || a.title.includes(fs.value)) && (!fc.value || a.category === fc.value);
       return [
         { label: '這次請你看的', items: focus.map(s => arts.value.find(a => a.slug === s)).filter(a => a && ok(a)) },
@@ -2122,14 +2199,57 @@ createApp({
     async function loadPack(e) {
       const file = e.target.files[0]; e.target.value = '';
       if (!file) return;
+      const buf = await file.arrayBuffer();
+      const send = (older) => fetch('/api/helper/load-pack' + (older ? '?older=1' : ''), { method: 'POST', headers: { 'Content-Type': 'application/zip', 'X-Workbench': '1' }, body: buf }).then(x => x.json()).catch(() => ({ error: '審稿程式沒有回應' }));
       busy.value = true; say('打開審稿包中…');
-      const r = await fetch('/api/helper/load-pack', { method: 'POST', headers: { 'Content-Type': 'application/zip', 'X-Workbench': '1' }, body: await file.arrayBuffer() }).then(x => x.json()).catch(() => ({ error: '審稿程式沒有回應' }));
+      let r = await send(false);
+      // 比現在用的舊：換過去文章會變回舊版，先問
+      if (!r.ok && r.older) {
+        busy.value = false;
+        if (!confirm(r.error + '\n\n確定要換回這份舊的審稿包嗎？')) return say('沒有換，繼續用現在的審稿包');
+        busy.value = true; r = await send(true);
+      }
       busy.value = false;
       if (!r.ok) return say(r.error || '打不開這個檔案', true);
+      // 審稿包附了新版審稿程式：重開一次才會換過去，畫面會自己接回來
+      if (r.restart) return restartHelper(r.app_version);
       cur.value = null;
       await loadOverview(); await loadArts();
       if (r.continued) return say(`已接上 ${fmtDate(r.exported_at)} 在另一台寄回的進度：${r.records} 篇的審稿紀錄、${r.articles} 篇改過的文章` + (r.clashes ? `。${r.clashes} 篇兩邊改到同一段，用了匯入的版本，這台原本的進度先存了一份在「下載」：${r.kept}` : ''));
       say(`已換成 ${fmtDate(r.created_at)} 的審稿包，有 ${r.focus} 篇請你看` + (r.kept ? `。沒寄回的進度先存了一份在「下載」：${r.kept}` : ''));
+    }
+
+    async function restartHelper(v) {
+      say(`審稿程式更新到 ${v} 版，重新開啟中，大約 10 秒…`);
+      clearInterval(pingTimer);
+      await api.post('/api/helper/restart').catch(() => {});
+      const t0 = Date.now();
+      const wait = async () => {
+        const r = await fetch('/api/overview').then(x => x.json()).catch(() => null);
+        if (r && r.version === v) return location.reload();
+        if (Date.now() - t0 > 60000) return say('審稿程式沒有自己重開：請按「結束審稿」，再重新點兩下「開始審稿」', true);
+        setTimeout(wait, 1000);
+      };
+      setTimeout(wait, 1500);
+    }
+
+    // ---- 平板連線：同一個 Wi-Fi 的平板連到這台電腦 ----
+    const lan = ref(null), lanBusy = ref(false);
+    function qrSvg(text) {
+      if (typeof qrcode !== 'function') return '';
+      const q = qrcode(0, 'M'); q.addData(text); q.make();
+      return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    }
+    async function openLan() {
+      lan.value = { open: true, on: !!hp.value.lan, url: hp.value.lan, fp: hp.value.lan_fp, qr: hp.value.lan ? qrSvg(hp.value.lan) : '' };
+    }
+    async function lanToggle(on) {
+      lanBusy.value = true;
+      const r = await api.post('/api/helper/lan', { on });
+      lanBusy.value = false;
+      if (!r.ok) { lan.value = { ...lan.value, error: r.error }; return; }
+      lan.value = { open: true, on: r.on, url: r.url || '', fp: r.fp || '', qr: r.on ? qrSvg(r.url) : '', error: '' };
+      await loadOverview();
     }
 
     // ---- 名字與說明 ----
@@ -2157,9 +2277,9 @@ createApp({
         else if (!store.get('wb_guide')) showGuide.value = true;
         if (!hashTab) tab.value = 'review';
       }
-      if (['build', 'helper'].includes(tab.value) && !isOwner.value) tab.value = isHelper.value ? 'review' : 'dash';
+      if (['build', 'helper'].includes(tab.value) && !isOwner.value) tab.value = 'review';
       if (isOwner.value) loadHelper();
-      fq.value = isOwner.value && ov.value.review.waiting.length ? 'passed' : 'mine';
+      fq.value = isHelper.value ? 'focus' : (isOwner.value && ov.value.review.waiting.length ? 'passed' : 'mine');
       // 網址沒指定分頁時，回到上次停的位置（負責人、小幫手都一樣）
       await loadArts();
       const last = !hashTab && !welcome.value ? await restoreSession() : null;
@@ -2191,7 +2311,7 @@ createApp({
       startComment, closeDraft, addComment, sendReply, resolve, delComment, applySugg, focusQuote, onIframeLoad, citeSet, citeSave, citeDirty, verify, goCite, togglePriority, dragSlug, dragStart, nudgePriority, starToggle, coreToggle, rate, sortByRating,
       runBuild, runLint, commit, push, runDeploy, saveName, closeGuide, count,
       askQuit, byeOwner, sessionLabel, saveAndQuit, quitOwner,
-      isHelper, hp, welcome, sent, askEnd, ending, bye, restoreAsk, helperInfo, packSel, packFull, packComments, packMsg, importRes, dropOver, conflict, choices,
+      takeCite, isHelper, hp, lan, lanBusy, openLan, lanToggle, restartHelper, welcome, sent, askEnd, ending, bye, restoreAsk, helperInfo, packSel, packFull, packComments, packMsg, importRes, dropOver, conflict, choices,
       askRestore, doRestore, fmtDate, loadHelper, packOrder, pickPack, makePack, isIncoming, pickResult, dropResult, openConflict, resolveConflict, discardConflict, markDiff,
       helperLabel, listGroups, navList, lastSaved, startHelper, sendBack, openFolder, endReview, quitHelper, loadPack,
     };

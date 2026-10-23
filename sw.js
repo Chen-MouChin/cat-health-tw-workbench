@@ -1,12 +1,12 @@
 // 平板版審稿的 service worker：
 // 1. 把審稿程式和 Pyodide 存進快取，第一次開過之後沒有網路也能用
 // 2. iframe 裡的網站預覽（…/site/…、…/manual）轉給頁面裡的 Python 回答
-const CACHE = 'cat-review-39bd3661ac';
+const CACHE = 'cat-review-e710966db3';
 const SCOPE = new URL('./', self.location).pathname;          // /cat-health-tw-workbench/
 const PYODIDE = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
 
 // 第一次安裝就把審稿程式和 Pyodide 全部存起來：只開過一次、沒有重新整理就離線，也打得開
-const APP_FILES = ["./", "index.html", "shim.js", "vendor/vue.global.prod.min.js", "vendor/Markdown-3.7-py3-none-any.whl", "py/server.py", "py/reviews.py", "py/pack.py", "py/web_bridge.py"];
+const APP_FILES = ["./", "index.html", "shim.js", "vendor/vue.global.prod.min.js", "vendor/qrcode.min.js", "vendor/Markdown-3.7-py3-none-any.whl", "py/server.py", "py/reviews.py", "py/pack.py", "py/web_bridge.py"];
 const PYODIDE_CORE = ['pyodide.js', 'pyodide.asm.js', 'pyodide.asm.wasm', 'python_stdlib.zip', 'pyodide-lock.json'];
 const PYODIDE_PKGS = ['ssl', 'openssl'];
 

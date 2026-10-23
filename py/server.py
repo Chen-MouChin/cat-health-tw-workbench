@@ -45,6 +45,7 @@ import urllib.parse
 import hashlib
 import hmac
 import http.cookies
+import io
 import ipaddress
 import secrets
 import socket
@@ -84,7 +85,12 @@ HELPER_DIR = ROOT / "build" / "helper"   # 產生的審稿包與 exe（build/ �
 OWNER_NAME = "Chen-MouChin"
 # 審稿程式的版本。改了小幫手看得到的功能就加一版，並同步更新 workbench/helper/使用手冊.txt 的版本與更新紀錄
 # （test_workbench.py 會檢查兩邊一致）
-VERSION = "1.7"
+VERSION = "1.8"
+# 開始審稿.exe 外殼的版本（helper_main.py 的 LAUNCHER 設進環境變數）；外殼太舊、跑不動審稿包附的新程式時，
+# 會改跑 exe 內建的舊程式，並在畫面上請小幫手跟負責人要完整版審稿包
+LAUNCHER = os.environ.get("WB_LAUNCHER", "")
+APP_FALLBACK = os.environ.get("WB_APP_FALLBACK", "")   # 審稿包附的程式載不起來的原因（有值就是改跑內建的）
+WEB = sys.platform == "emscripten"                     # 平板版（瀏覽器裡的 Pyodide）
 FOOTNOTE_RE = re.compile(r"\[\^([A-Za-z0-9][A-Za-z0-9_\-\.]*)\]")
 PY = sys.executable
 RESEARCH = ROOT / "research"
@@ -788,10 +794,10 @@ def create_pack(body: dict) -> dict:
             return {"ok": False, "error": err}
     recs = {k: v for k, v in STORE.all().items() if k in slugs} if body.get("comments", True) else {}
     r = pack.make_pack(ROOT, HELPER_DIR / "packs", focus=focus, slugs=slugs, records=recs, versions=VERSIONS,
-                       owner=OWNER_NAME, exe=exe)
+                       owner=OWNER_NAME, exe=exe, app_version=VERSION, wb=WB)
     packs = _jload(PACKS_LOG, [])
     packs.append({"id": r["id"], "at": reviews.now(), "file": r["file"].name, "focus": len(focus),
-                  "total": len(slugs), "full": bool(exe), "returns": []})
+                  "total": len(slugs), "full": bool(exe), "app_version": VERSION, "returns": []})
     _jsave(PACKS_LOG, packs[-50:])
     return {"ok": True, "name": r["file"].name, "size": r["size"], "id": r["id"]}
 
@@ -850,6 +856,68 @@ def apply_incoming(slug: str, theirs: str, base_h: str, who: str, at: str) -> di
     return {"kind": "conflict", "result": why or "你也改過這篇，要選版本"}
 
 
+CITE_INCOMING = RESEARCH / "reviews" / "_incoming_citations.json"   # 兩邊都改過、等負責人決定的文獻修改
+
+
+def _cite_set(entry: dict, inc: dict) -> None:
+    for f in pack.CITE_FIELDS:
+        if f in inc:
+            entry[f] = bool(inc[f]) if f == "url_verified" else inc[f]
+    if inc.get("url_verified") and not entry.get("verified_at"):
+        entry["verified_at"] = dt.date.today().isoformat()
+
+
+def apply_cite_changes(incoming: dict, who: str, at: str, force: bool = False) -> list[dict]:
+    """小幫手改過的文獻（中文標題、摘要、備註、網址、網址已驗證）。
+    這邊從審稿包之後沒動過就直接套用；這邊也改過就先存著，在匯入結果讓負責人選（force=True 是另一台的進度，直接用）。
+    核准狀態不在裡面，只有負責人能改。"""
+    rows = []
+    if not incoming:
+        return rows
+    pending = _jload(CITE_INCOMING, {})
+    with LOCK:
+        data = load_citations()
+        for key, inc in incoming.items():
+            if key not in data or not isinstance(inc, dict):
+                rows.append({"key": key, "kind": "gone", "result": "文獻庫已經沒有這筆"})
+                continue
+            cur = data[key]
+            mine = pack.cite_hash(cur)
+            theirs = pack.cite_hash(inc)
+            if mine == theirs:
+                rows.append({"key": key, "kind": "same", "result": "已經是這個版本"})
+                pending.pop(key, None)
+            elif force or mine == inc.get("base"):
+                _cite_set(cur, inc)
+                rows.append({"key": key, "kind": "applied", "result": f"已套用 {who} 改的文獻資料"})
+                pending.pop(key, None)
+            else:
+                pending[key] = {"who": who, "at": at, **{f: inc.get(f) for f in pack.CITE_FIELDS}}
+                rows.append({"key": key, "kind": "conflict", "result": "你也改過這筆，要選版本",
+                             "theirs": {f: inc.get(f) for f in pack.CITE_FIELDS}})
+        if any(r["kind"] == "applied" for r in rows):
+            save_citations(data)
+    _jsave(CITE_INCOMING, pending)
+    return rows
+
+
+def take_cite(key: str, use: str) -> dict:
+    """負責人對「兩邊都改過」的文獻做決定：theirs 用小幫手的，mine 保留這邊的。"""
+    pending = _jload(CITE_INCOMING, {})
+    inc = pending.pop(key, None)
+    if not inc:
+        return {"ok": False, "error": "這筆沒有等你選的版本"}
+    if use == "theirs":
+        with LOCK:
+            data = load_citations()
+            if key not in data:
+                return {"ok": False, "error": "文獻庫已經沒有這筆"}
+            _cite_set(data[key], inc)
+            save_citations(data)
+    _jsave(CITE_INCOMING, pending)
+    return {"ok": True}
+
+
 def import_result(data: bytes) -> dict:
     sha = hashlib.sha256(data).hexdigest()
     seen = _jload(IMPORTS_LOG, {})
@@ -882,14 +950,19 @@ def import_result(data: bytes) -> dict:
         else:
             row.update(kind="notes", result="註解已加入" if row["comments"] else "審稿紀錄已加入")
         rows.append(row)
+    cite_rows = apply_cite_changes(manifest.get("_citations") or {}, who, at)
+    rebuilt |= any(r["kind"] == "applied" for r in cite_rows)
     summary = {"ok": True, "who": who, "exported_at": at, "pack_id": manifest.get("pack_id", ""), "rows": rows,
+               "cites": cite_rows, "app_version": str(manifest.get("app_version") or "1.7 以前"),
+               "launcher": str(manifest.get("launcher") or ""),
                "at": reviews.now(), "build_ok": build_site()["ok"] if rebuilt else None}
     seen[sha] = summary
     _jsave(IMPORTS_LOG, seen)
     packs = _jload(PACKS_LOG, [])
     for pk in packs:
         if pk["id"] == summary["pack_id"]:
-            pk["returns"].append({"who": who, "at": at, "done": sum(1 for r in rows if r["judgment"] != "還在看")})
+            pk["returns"].append({"who": who, "at": at, "done": sum(1 for r in rows if r["judgment"] != "還在看"),
+                                  "app_version": summary["app_version"], "launcher": summary["launcher"]})
     _jsave(PACKS_LOG, packs)
     return summary
 
@@ -941,8 +1014,15 @@ def helper_overview() -> dict:
     incoming = [{"slug": slug, "who": r["incoming"]["who"], "at": r["incoming"]["at"], "why": r["incoming"].get("why", "")}
                 for slug, r in STORE.all().items() if r.get("incoming")]
     imports = sorted(_jload(IMPORTS_LOG, {}).values(), key=lambda x: x.get("at", ""), reverse=True)[:5]
+    cite_inc = [{"key": k, **v} for k, v in sorted(_jload(CITE_INCOMING, {}).items())]
+    # 小幫手最近一次寄回時用的審稿程式版本：外殼（開始審稿.exe）太舊就要給完整版
+    last = next((rt for pk in _jload(PACKS_LOG, [])[::-1] for rt in pk.get("returns", [])[::-1]), {})
     return {"packs": _jload(PACKS_LOG, [])[::-1][:10], "incoming": incoming, "imports": imports,
-            "exe": helper_exe().status(), "core": sorted(core_slugs())}
+            "cite_incoming": cite_inc, "exe": helper_exe().status(), "core": sorted(core_slugs()),
+            "version": VERSION, "helper_app": last.get("app_version", ""), "helper_launcher": last.get("launcher", ""),
+            # 電腦版的外殼從沒寄回過版本（1.7 以前的 exe），下一包要給完整版；平板版每次都是最新，不算
+            "needs_full": not any(rt.get("launcher") not in (None, "", "web")
+                                  for pk in _jload(PACKS_LOG, []) for rt in pk.get("returns", []))}
 
 
 # ---------------------------------------------------------------------------
@@ -976,7 +1056,8 @@ def helper_info() -> dict:
 
 def helper_export(suffix: str = "") -> dict:
     name = helper_name() or "小幫手"
-    data, counts = pack.make_result(ROOT, STORE.all(), name, all_slugs())
+    data, counts = pack.make_result(ROOT, STORE.all(), name, all_slugs(), app_version=VERSION,
+                                    launcher=LAUNCHER or ("web" if WEB else ""))
     out = pack.downloads_dir() / f"審稿結果-{pack.safe_name(name)}-{dt.date.today().strftime('%m%d')}{suffix}.zip"
     tmp = out.with_suffix(".tmp")
     tmp.write_bytes(data)
@@ -1023,6 +1104,8 @@ def helper_continue(data: bytes) -> dict:
                 local = STORE.load(slug)
                 reviews.merge_record(local, inc)
                 STORE.save(local)
+    # 另一台改過的文獻：同一個人的進度，直接用；審稿包當時的雜湊不變，之後寄回給負責人時照樣算「改過」
+    cite_rows = apply_cite_changes(manifest.get("_citations") or {}, who, reviews.now(), force=True)
     changed = 0
     for slug, (cur, new, clash) in plan.items():
         res = save_raw(slug, new, text_hash(cur), who, "接續另一台的進度", gate=False,
@@ -1037,20 +1120,103 @@ def helper_continue(data: bytes) -> dict:
         _LINT_MTIME.clear()
         build_site()
     return {"ok": True, "continued": True, "articles": changed, "records": len(recs), "kept": kept,
+            "citations": sum(1 for r in cite_rows if r["kind"] == "applied"),
             "clashes": sum(1 for _, _, c in plan.values() if c), "exported_at": str(manifest.get("exported_at") or "")[:19]}
 
 
-def helper_load_pack(src) -> dict:
+def pack_meta_of(src) -> dict:
+    """審稿包（zip 的 bytes 或解壓後的資料夾）的 pack.json。"""
+    try:
+        if isinstance(src, (bytes, bytearray)):
+            import zipfile
+            return pack.pack_members(zipfile.ZipFile(io.BytesIO(bytes(src))))[0]
+        return _jload(Path(src) / "pack.json", {})
+    except (ValueError, OSError, KeyError):
+        return {}
+
+
+def helper_load_pack(src, allow_older: bool = False) -> dict:
     if isinstance(src, (bytes, bytearray)) and pack.is_result(src):
         return helper_continue(bytes(src))
+    new, cur = pack_meta_of(src), _jload(ROOT / "pack.json", {})
+    # 換成比較舊的審稿包會把文章換回舊版（例如從舊資料夾點了開始審稿），先問過
+    if not allow_older and cur.get("created_at") and new.get("created_at") and new["created_at"] < cur["created_at"]:
+        return {"ok": False, "older": True, "error": f"這份審稿包（{new['created_at'][5:16].replace('T', ' ')}）比現在用的"
+                f"（{cur['created_at'][5:16].replace('T', ' ')}）舊，換過去文章會變回舊版。"}
     kept = None
     if (ROOT / "pack.json").exists() and unsent_slugs():
         kept = helper_export("-自動保留")
     with LOCK, BUILD_LOCK:
         meta = pack.install_pack(ROOT, src, lambda local, inc: reviews.merge_record(local, inc, remote=True))
         _LINT_MTIME.clear()
+    # 審稿包附了不同版本的審稿程式：開始審稿.exe 要重開才會換過去（平板版每次都是最新，不用）
+    app_v = pack.read_version(ROOT / "app" / "server.py")
     return {"ok": True, "kept": kept["file"] if kept else "", "focus": len(meta.get("focus", [])),
-            "created_at": meta.get("created_at", "")}
+            "created_at": meta.get("created_at", ""), "app_version": app_v,
+            "restart": bool(LAUNCHER and os.environ.get("WB_RELAUNCH") and app_v and app_v != VERSION)}
+
+
+def helper_restart() -> dict:
+    """換了附新版程式的審稿包之後重開審稿程式：先開新的（等舊的放掉鎖才啟動），再關掉自己。畫面會自己接回去。"""
+    try:
+        argv = json.loads(os.environ.get("WB_RELAUNCH", "[]"))
+    except ValueError:
+        argv = []
+    if not argv:
+        return {"ok": False, "error": "請按「結束審稿」，再重新點兩下「開始審稿」"}
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    # 單一檔 exe 啟動自己的新副本時，要讓新副本自己解開程式；不然會沿用這個副本的暫存資料夾，
+    # 這邊一關掉資料夾就被刪，新副本載不到模組（PyInstaller 6.9 以上看這個變數）
+    env = dict(os.environ, PYINSTALLER_RESET_ENVIRONMENT="1")
+    subprocess.Popen(argv + ["--wait-lock", "--no-open", "--no-pack"], creationflags=flags, close_fds=True, env=env)
+    threading.Timer(0.5, lambda: [s.shutdown() for s in HELPER_STATE["servers"]]).start()
+    return {"ok": True}
+
+
+# 小幫手的平板連到小幫手自己的電腦（同一個 Wi-Fi）：電腦上的審稿程式另外開一個區網 HTTPS 入口，
+# 平板用 Safari 開網址（或掃 QR code），兩台看的是同一份文章與審稿紀錄，不用來回寄檔。
+HELPER_LAN = {"srv": None, "url": "", "fp": "", "ip": ""}
+
+
+def helper_lan(on: bool, port: int) -> dict:
+    if WEB:
+        return {"ok": False, "error": "平板版不能讓別台連進來"}
+    cur = HELPER_LAN["srv"]
+    if not on:
+        if cur:
+            cur.shutdown()
+            cur.server_close()
+            HELPER_STATE["servers"] = [s for s in HELPER_STATE["servers"] if s is not cur]
+        HELPER_LAN.update(srv=None, url="", fp="", ip="")
+        ACCESS["token"] = ""
+        return {"ok": True, "on": False}
+    ip = lan_ip()
+    if cur and HELPER_LAN["ip"] == ip:
+        return {"ok": True, "on": True, "url": HELPER_LAN["url"], "fp": HELPER_LAN["fp"], "ip": ip}
+    if cur:
+        helper_lan(False, port)
+    if ip == "127.0.0.1" or not ipaddress.ip_address(ip).is_private:
+        return {"ok": False, "error": "這台電腦沒有連上家裡或辦公室的網路（找不到區網 IP）"}
+    try:
+        cert_p, key_p, fp = ensure_cert(ip)
+    except ImportError:
+        return {"ok": False, "error": "這版開始審稿.exe 沒有區網連線的元件，請跟網站負責人要完整版審稿包"}
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_cert_chain(cert_p, key_p)
+    try:
+        srv = WBServer((ip, port), Handler)
+    except OSError as e:
+        return {"ok": False, "error": f"開不了區網入口：{e}"}
+    srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+    # 通行碼每次開都換；平板第一次開網址後存在 Safari 的 cookie
+    ACCESS["token"] = ACCESS["token"] or secrets.token_urlsafe(9)
+    ACCESS["hosts"].add(f"{ip}:{port}")
+    url = f"https://{ip}:{port}/?t={ACCESS['token']}"
+    HELPER_LAN.update(srv=srv, url=url, fp=fp, ip=ip)
+    HELPER_STATE["servers"].append(srv)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return {"ok": True, "on": True, "url": url, "fp": fp, "ip": ip}
 
 
 def open_folder(path: str) -> None:
@@ -1092,7 +1258,8 @@ def client_role(ip: str, cookie_header: str, query_token: str) -> str:
         addr = addr.ipv4_mapped
     if addr.is_loopback:
         return "reviewer" if HELPER else "owner"
-    if HELPER or not ACCESS["token"] or not addr.is_private or addr.is_link_local:
+    # 區網：負責人開 --lan，或小幫手在自己電腦按「平板連線」時才有通行碼；小幫手那邊連進來的也是審稿者
+    if not ACCESS["token"] or not addr.is_private or addr.is_link_local:
         return ""
     jar = http.cookies.SimpleCookie()
     try:
@@ -1103,7 +1270,8 @@ def client_role(ip: str, cookie_header: str, query_token: str) -> str:
     return "reviewer" if given and hmac.compare_digest(given, ACCESS["token"]) else ""
 
 
-CERT_DIR = ROOT / "build" / "workbench-cert"   # build/ 不進 git
+# build/ 不進 git。小幫手那邊換審稿包會整個換掉 build/，憑證放工作資料夾另一處，平板才不用每次重新信任
+CERT_DIR = ROOT / ("lan-cert" if HELPER else "build/workbench-cert")
 
 
 def ensure_cert(ip: str) -> tuple[Path, Path, str]:
@@ -1275,6 +1443,14 @@ class Handler(SimpleHTTPRequestHandler):
             return False
         return True
 
+    def _is_local(self) -> bool:
+        """請求是不是從這台電腦本機來的（不是區網的平板）。"""
+        try:
+            addr = ipaddress.ip_address(self.client_address[0])
+        except ValueError:
+            return False
+        return bool(getattr(addr, "ipv4_mapped", None) and addr.ipv4_mapped.is_loopback) or addr.is_loopback
+
     def log_message(self, fmt, *args):
         # 成功的請求不印（存檔等動作另外印一行「✓」）；4xx、5xx 才印，相同的 30 秒內合併
         if len(args) >= 2 and str(args[1]).isdigit() and int(args[1]) >= 400 and "/api/helper/ping" not in str(args[0]):
@@ -1375,9 +1551,16 @@ class Handler(SimpleHTTPRequestHandler):
                         target = draft
                 return self._file(target)
             if path == "/api/overview":
+                local = self._is_local()
+                # caps：這個畫面可以用哪些功能。小幫手除了 git、部署、核准以外都有；平板版不能上網核對原文
+                caps = {"verify": not WEB, "lint": True, "lan": HELPER and not WEB and local, "approve": self.role == "owner"}
                 return self._json({**overview(), "role": self.role, "who": self.who, "owner": OWNER_NAME,
                                    "code_stale": not FROZEN and code_sig() != CODE_SIG, "version": VERSION,
-                                   "helper": helper_info() if HELPER else None})
+                                   "caps": caps, "local": local,
+                                   "helper": {**helper_info(), "lan": HELPER_LAN["url"] if local else "",
+                                              "lan_fp": HELPER_LAN["fp"] if local else "", "launcher": LAUNCHER,
+                                              "app_fallback": APP_FALLBACK, "web": WEB,
+                                              "older_pack": HELPER_STATE.get("older_pack", "")} if HELPER else None})
             if path.startswith("/api/helper/"):
                 return self._helper_get(path)
             if path == "/api/session":
@@ -1449,7 +1632,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _helper_post(self, path: str):
         """/api/helper/*：負責人的審稿包與匯入，小幫手的寄回、換審稿包、結束。"""
-        owner_acts = ("/api/helper/pack", "/api/helper/import")
+        owner_acts = ("/api/helper/pack", "/api/helper/import", "/api/helper/cite")
         if path in owner_acts or path.startswith("/api/helper/conflict/"):
             if self.role != "owner":
                 return self._json({"error": "只有網站負責人可以用"}, 403)
@@ -1457,6 +1640,9 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(create_pack(self._body()))
             if path == "/api/helper/import":
                 return self._json(import_result(self._bytes(60_000_000)))
+            if path == "/api/helper/cite":
+                b = self._body()
+                return self._json(take_cite(str(b.get("key", "")), str(b.get("use", ""))))
             slug = path.rsplit("/", 1)[1]
             if not re.match(r"^[A-Za-z0-9\-]+$", slug):
                 return self.send_error(404)
@@ -1469,6 +1655,15 @@ class Handler(SimpleHTTPRequestHandler):
         HELPER_STATE["ping"] = time.time()
         if path == "/api/helper/ping":
             return self._json({"ok": True})
+        # 這幾個只給電腦本機：平板連進來時不能關掉電腦上的程式、開關區網入口
+        local_only = ("/api/helper/lan", "/api/helper/restart", "/api/helper/quit", "/api/helper/open-folder")
+        if path in local_only and not self._is_local():
+            return self._json({"error": "這個要在電腦上按"}, 403)
+        if path == "/api/helper/lan":
+            return self._json(helper_lan(bool(self._body().get("on")), self.server.server_address[1] if self.server else 0))
+        if path == "/api/helper/restart":
+            self._json(helper_restart())
+            return
         if path == "/api/helper/name":
             name = pack.safe_name(str(self._body().get("name", "")))
             pack.save_helper_state(ROOT, name=name)
@@ -1480,7 +1675,8 @@ class Handler(SimpleHTTPRequestHandler):
             open_folder(f if f and Path(f).exists() else str(pack.downloads_dir()))
             return self._json({"ok": True})
         if path == "/api/helper/load-pack":
-            res = helper_load_pack(self._bytes(200_000_000))
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            res = helper_load_pack(self._bytes(200_000_000), allow_older=qs.get("older") == ["1"])
             return self._json(res)
         if path == "/api/helper/quit":
             self._json({"ok": True})
@@ -1494,8 +1690,9 @@ class Handler(SimpleHTTPRequestHandler):
         path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
         if not self._gate():
             return
-        if HELPER and (path in OWNER_ONLY or path.startswith("/api/verify/") or path == "/api/lint"):
-            return self._json({"error": "小幫手的審稿程式沒有這個功能"}, 403)
+        # 小幫手的審稿程式：除了 git、部署、核准，其他功能都有（2026-10-23）；平板版不能上網抓原文
+        if HELPER and (path in OWNER_ONLY or (WEB and path.startswith("/api/verify/"))):
+            return self._json({"error": "小幫手的審稿程式沒有這個功能" if not WEB else "平板版不能到原文核對，請用電腦"}, 403)
         if path in OWNER_ONLY and self.role != "owner":
             return self._json({"error": "commit、push、部署只能在主機本機操作"}, 403)
         if re.match(r"^/api/articles/[A-Za-z0-9\-]+/quality$", path) and self.role != "owner":
@@ -1648,7 +1845,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({"ok": True, "order": set_priority(slug, bool(body.get("on")))})
             m = re.match(r"^/api/verify/([A-Za-z0-9][A-Za-z0-9_\-\.]*)$", path)
             if m:
-                cmd = [PY, "scrapers/literature/verify_citation.py", m.group(1), "--json"] + (["--refresh"] if body.get("refresh") else [])
+                cmd = py("scrapers/literature/verify_citation.py", m.group(1), "--json") + (["--refresh"] if body.get("refresh") else [])
                 r = run(cmd, 180)
                 try:
                     res = json.loads(r["stdout"].strip().splitlines()[-1])
@@ -1659,7 +1856,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(build_site())
             if path == "/api/lint":
                 _LINT_MTIME.clear()
-                r = run([PY, "scripts/lint_articles.py"], 300)
+                r = run(py("scripts/lint_articles.py"), 300)
                 return self._json(r)
             if path == "/api/git/commit":
                 return self._json(git_commit(body.get("message", "")))
@@ -1726,7 +1923,10 @@ def helper_start(pack_dir: Path | None, port: int = 8011, open_window: bool = Tr
     if pack_dir and (pack_dir / "pack.json").exists():
         new = _jload(pack_dir / "pack.json", {})
         if new.get("id") and new.get("id") != _jload(ROOT / "pack.json", {}).get("id"):
-            helper_load_pack(pack_dir)
+            # 從舊資料夾點開始審稿時，不要把已經換過的新審稿包蓋回舊的（2026-10-23 以前會）
+            res = helper_load_pack(pack_dir)
+            if res.get("older"):
+                HELPER_STATE["older_pack"] = str(new.get("created_at", ""))
     EVENTS.start()
     HELPER_STATE["servers"] = [srv]
     HELPER_STATE["ping"] = time.time()

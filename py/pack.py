@@ -39,12 +39,21 @@ SNAPSHOT_FILES = [
     "data/breeds/breeds.json", "data/breeds_en.json", "data/breeds/warnings.json",
     "data/vets/all_vets.json", "data/vets/taipei_newtaipei_vets.json",
     "data/subsidy/neuter_2026.json", "content/pages/index.html", "content/pages/notice.json",
+    "scrapers/literature/verify_citation.py",   # 文獻頁「到原文核對」用
 ]
 # build.py 新增要讀的資料檔時，這裡也要加；test_workbench 的審稿包流程會在小幫手那邊真的跑一次 build.py 把關
 SNAPSHOT_GLOBS = ["content/articles/*.md", "build/drafts/articles/*.html"]
 SNAPSHOT_DIRS = ["frontend"]
 # 小幫手的工作資料夾裡，換新審稿包時要整個換掉的部分（審稿紀錄 research/ 保留）
-REPLACED = ["build.py", "scripts", "content", "data", "frontend", "build"]
+REPLACED = ["build.py", "scripts", "scrapers", "content", "data", "frontend", "build", "app"]
+# 工作檯程式本身（相對 workbench/）。每個審稿包都附一份放在「審稿資料/app/」，
+# 小幫手那邊的開始審稿.exe 會改跑這一份，所以只給文章的審稿包也能把審稿程式更新到最新版
+APP_FILES = ["server.py", "reviews.py", "pack.py", "web_bridge.py", "index.html", "icon.ico"]
+APP_DIRS = ["vendor"]
+# 小幫手在文獻頁能改的欄位；寄回時帶回改過的這幾欄（核准狀態只有負責人能改，不在裡面）
+CITE_FIELDS = ("title_zh", "abstract_zh", "notes", "url", "url_verified")
+# 審稿包與寄回檔的格式版本。2：附工作檯程式、寄回帶文獻修改（2026-10-23）。讀的時候不認得的檔案一律略過
+FORMAT = 2
 
 MANUAL = Path(__file__).resolve().parent / "helper" / "使用手冊.txt"   # 放進審稿包，{owner} 換成負責人的名字
 
@@ -273,6 +282,39 @@ def snapshot_paths(root: Path) -> list[Path]:
     return [p for p in files if p.name != "README.md" or "content" not in p.parts]
 
 
+def app_paths(wb: Path) -> list[tuple[Path, str]]:
+    """工作檯程式的檔案：(來源, 審稿包裡的相對路徑)。"""
+    out = [(wb / f, f) for f in APP_FILES if (wb / f).is_file()]
+    for d in APP_DIRS:
+        out += [(p, p.relative_to(wb).as_posix()) for p in sorted((wb / d).rglob("*")) if p.is_file()]
+    if MANUAL.exists():
+        out.append((MANUAL, "使用手冊.txt"))
+    return out
+
+
+def cite_hash(entry: dict) -> str:
+    """文獻裡小幫手能改的那幾欄的雜湊，用來判斷誰改過。"""
+    s = json.dumps({f: entry.get(f) for f in CITE_FIELDS}, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
+
+
+def cite_hashes(citations: dict) -> dict[str, str]:
+    return {k: cite_hash(v) for k, v in citations.items() if isinstance(v, dict) and not k.startswith("_")}
+
+
+def read_version(server_py: Path) -> str:
+    """不 import，直接從 server.py 讀 VERSION。"""
+    try:
+        m = re.search(r'^VERSION = "([0-9.]+)"', server_py.read_text(encoding="utf-8"), re.M)
+    except OSError:
+        return ""
+    return m.group(1) if m else ""
+
+
+def version_key(v: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", v or "")) or (0,)
+
+
 def clean_record(rec: dict) -> dict:
     """給小幫手的審稿紀錄：拿掉認領狀態與只對這台電腦有意義的欄位。"""
     rec = json.loads(json.dumps(rec))
@@ -321,14 +363,21 @@ def safe_name(s: str) -> str:
 
 
 def make_pack(root: Path, out_dir: Path, *, focus: list[str], slugs: dict[str, Path], records: dict[str, dict],
-              versions: Versions, owner: str, exe: Path | None) -> dict:
-    """產生審稿包 zip。slugs 是全部文章 {slug: 檔案}；focus 是這次請小幫手先看的。"""
+              versions: Versions, owner: str, exe: Path | None, app_version: str = "",
+              wb: Path | None = None) -> dict:
+    """產生審稿包 zip。slugs 是全部文章 {slug: 檔案}；focus 是這次請小幫手先看的。
+    wb 是工作檯程式的資料夾，附進「審稿資料/app/」；app_version 是它的 VERSION。"""
     pack_id = dt.datetime.now().strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(3)
     base = {}
     for slug, p in slugs.items():
         base[slug] = versions.put(slug, p.read_text(encoding="utf-8"))   # 匯入時三方合併要用
-    meta = {"kind": PACK_KIND, "version": 1, "id": pack_id, "created_at": now(), "owner": owner,
-            "focus": [s for s in focus if s in slugs], "base": base}
+    try:
+        cites = json.loads((root / "content" / "references" / "citations.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cites = {}
+    meta = {"kind": PACK_KIND, "version": 1, "format": FORMAT, "app_version": app_version, "id": pack_id,
+            "created_at": now(), "owner": owner, "focus": [s for s in focus if s in slugs], "base": base,
+            "cite_base": cite_hashes(cites), "has_exe": bool(exe)}
     out_dir.mkdir(parents=True, exist_ok=True)
     out = unique_path(out_dir, "貓健康站審稿包-" + dt.date.today().strftime("%m%d"))
     tmp = out.with_suffix(".tmp")
@@ -339,6 +388,8 @@ def make_pack(root: Path, out_dir: Path, *, focus: list[str], slugs: dict[str, P
         z.writestr(f"{DATA_DIR}/pack.json", json.dumps(meta, ensure_ascii=False, indent=1))
         for p in snapshot_paths(root):
             z.write(p, f"{DATA_DIR}/files/" + p.relative_to(root).as_posix())
+        for p, rel in (app_paths(wb) if wb else []):
+            z.write(p, f"{DATA_DIR}/app/{rel}")
         for slug, rec in records.items():
             if slug in slugs:
                 z.writestr(f"{DATA_DIR}/reviews/{slug}.json", json.dumps(clean_record(rec), ensure_ascii=False, indent=1))
@@ -350,36 +401,46 @@ def make_pack(root: Path, out_dir: Path, *, focus: list[str], slugs: dict[str, P
 # 讀 zip（兩邊共用）：只收預期的檔名，限制大小
 # ---------------------------------------------------------------------------
 
-RESULT_NAMES = re.compile(r"^(manifest\.json|articles/[A-Za-z0-9\-]+\.md|reviews/[A-Za-z0-9\-]+\.json)$")
+RESULT_NAMES = re.compile(r"^(manifest\.json|articles/[A-Za-z0-9\-]+\.md|reviews/[A-Za-z0-9\-]+\.json"
+                          r"|citations/[A-Za-z0-9][A-Za-z0-9_\-\.]*\.json)$")
 
 
 def read_result(data: bytes) -> tuple[dict, dict[str, str], dict[str, dict]]:
-    """解開小幫手寄回的檔案。回傳 (manifest, {slug: 文章原文}, {slug: 審稿紀錄})。"""
+    """解開小幫手寄回的檔案。回傳 (manifest, {slug: 文章原文}, {slug: 審稿紀錄})；
+    文獻的修改放在 manifest["_citations"]（{key: {欄位, base}}）。
+    不認得的檔案略過不讀：新版審稿程式寄回的檔案多了東西，舊版也打得開（2026-10-23 以前是直接拒絕）。"""
     try:
         z = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
         raise ValueError("這不是審稿結果的檔案（不是 zip）")
     total = 0
-    arts, recs, manifest = {}, {}, None
+    arts, recs, cites, manifest, skipped = {}, {}, {}, None, []
     for info in z.infolist():
         if info.is_dir():
             continue
-        if not RESULT_NAMES.match(info.filename):
-            raise ValueError(f"檔案裡有不認得的內容：{info.filename}")
         total += info.file_size
         if info.file_size > 3_000_000 or total > 40_000_000:
             raise ValueError("檔案太大，不像審稿結果")
+        if not RESULT_NAMES.match(info.filename):
+            skipped.append(info.filename)
+            continue
         raw = z.read(info).decode("utf-8")
         if info.filename == "manifest.json":
             manifest = json.loads(raw)
         elif info.filename.startswith("articles/"):
             arts[info.filename[9:-3]] = raw
+        elif info.filename.startswith("citations/"):
+            c = json.loads(raw)
+            if isinstance(c, dict):
+                cites[info.filename[10:-5]] = c
         else:
             rec = json.loads(raw)
             if isinstance(rec, dict):
                 recs[info.filename[8:-5]] = rec
     if not manifest or manifest.get("kind") != RESULT_KIND:
         raise ValueError("這不是審稿結果的檔案。要匯入的是小幫手寄回的「審稿結果-名字-日期.zip」")
+    manifest["_citations"] = cites
+    manifest["_skipped"] = skipped[:20]
     return manifest, arts, recs
 
 
@@ -440,8 +501,12 @@ def install_pack(work: Path, src, merge) -> dict:
     for rel in names:
         if rel.startswith("files/"):
             dest = stage / rel[6:]
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(read(rel))
+        elif rel.startswith("app/"):
+            dest = stage / "app" / rel[4:]      # 審稿包附的工作檯程式，開始審稿.exe 下次啟動改跑這份
+        else:
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(read(rel))
     for name in REPLACED:
         p = work / name
         if p.is_dir():
@@ -496,16 +561,36 @@ def save_helper_state(work: Path, **kv) -> dict:
     return st
 
 
-def make_result(work: Path, records: dict[str, dict], name: str, articles: dict[str, Path]) -> tuple[bytes, dict]:
-    """小幫手的「寄回結果」：改過的文章原文＋審稿紀錄。每次都包含到目前為止的全部進度。"""
+def changed_citations(work: Path, meta: dict) -> dict[str, dict]:
+    """小幫手改過的文獻（和審稿包當時比）：{key: {改得到的欄位..., "base": 審稿包當時的雜湊}}。"""
+    cite_base = meta.get("cite_base") or {}
+    try:
+        cites = json.loads((work / "content" / "references" / "citations.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for k, v in cites.items():
+        if k in cite_base and isinstance(v, dict) and cite_hash(v) != cite_base[k]:
+            out[k] = {**{f: v.get(f) for f in CITE_FIELDS}, "base": cite_base[k]}
+    return out
+
+
+def make_result(work: Path, records: dict[str, dict], name: str, articles: dict[str, Path],
+                app_version: str = "", launcher: str = "") -> tuple[bytes, dict]:
+    """小幫手的「寄回結果」：改過的文章原文、改過的文獻、審稿紀錄。每次都包含到目前為止的全部進度。"""
     meta = json.loads((work / "pack.json").read_text(encoding="utf-8"))
     base = meta.get("base", {})
     since = meta.get("installed_at", "")
-    manifest = {"kind": RESULT_KIND, "version": 1, "pack_id": meta.get("id"), "reviewer": name,
-                "exported_at": now(), "installed_at": since, "articles": {}}
-    counts = {"passed": 0, "changes": 0, "comments": 0, "edits": 0, "articles": 0}
+    manifest = {"kind": RESULT_KIND, "version": 1, "format": FORMAT, "app_version": app_version, "launcher": launcher,
+                "pack_id": meta.get("id"), "reviewer": name, "exported_at": now(), "installed_at": since,
+                "articles": {}, "citations": []}
+    counts = {"passed": 0, "changes": 0, "comments": 0, "edits": 0, "articles": 0, "citations": 0}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for k, c in changed_citations(work, meta).items():
+            z.writestr(f"citations/{k}.json", json.dumps(c, ensure_ascii=False, indent=1))
+            manifest["citations"].append(k)
+            counts["citations"] += 1
         for slug, p in articles.items():
             text = p.read_text(encoding="utf-8")
             if base.get(slug) and content_hash(text) != base[slug]:
