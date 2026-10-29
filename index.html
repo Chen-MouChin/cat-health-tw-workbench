@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta name="robots" content="noindex, nofollow">
-<script src="shim.js?v=e710966db3"></script>
+<script src="shim.js?v=aa2bbab949"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貓健康站 工作檯</title>
@@ -11,6 +11,8 @@
 <script src="vendor/vue.global.prod.min.js" integrity="sha384-wdamyDHEiblYHsu/XTokGtIeFekZu7xN37Yvkl0NZ7PnhwRB+nwE1ByT7VlwiypE"></script>
 <!-- qrcode-generator 1.4.4（MIT），平板連線的 QR code 用 -->
 <script src="vendor/qrcode.min.js" integrity="sha384-mZT2gIty7ZDdOGkxfP6joZcYdMW1Jvj9dRlfpTmaJAKKXTqzygtB22k7FLe+KZC1"></script>
+<!-- jsQR 1.4.0（Apache-2.0，vendor/jsQR-LICENSE.txt），用相機讀 QR code：電腦和平板不在同一個網路時互傳進度 -->
+<script src="vendor/jsQR.js" integrity="sha384-b5Ya4Bq3qCyz39m2ISh+4DxjAIljdeFwK/BsXLuj9gugaNwAcj/ia15fxNZL9Nlx"></script>
 <style>
   :root { --bg:#f9f6f0; --card:#fff; --text:#1d1d1f; --muted:#6e6e73; --faint:#a1a1a6; --border:#e8e4db; --gold:#b8860b; --green:#3b6a50; --green-bg:#e8f3ea; --red:#b04a3a; --amber:#8a7340; --amber-bg:#f5f0e8; --blue:#2d4a8a; --blue-bg:#e9eef8; --hl:#fff1b8; }
   * { box-sizing:border-box; }
@@ -296,6 +298,10 @@
   .cit-row textarea { min-height:60px; }
 
   .modal-bg { position:fixed; inset:0; background:rgba(29,29,31,.4); z-index:50; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .xfer-qr { display:block; margin:8px auto; width:min(560px, 86vw, 62vh); height:auto; background:#fff; image-rendering:pixelated; }
+  .xfer-cam { display:block; width:100%; max-height:52vh; background:#000; border-radius:10px; object-fit:contain; }
+  .xfer-bar { height:12px; background:#f0ece4; border-radius:6px; overflow:hidden; margin:10px 0 4px; }
+  .xfer-bar > div { height:100%; background:#3b6a50; transition:width .2s; }
   .modal { background:#fff; border-radius:14px; padding:20px 22px; max-width:520px; width:100%; box-shadow:0 10px 40px rgba(0,0,0,.2); }
   .modal h2 { margin:0 0 8px; font-size:18px; }
   .modal ol { padding-left:20px; line-height:1.8; margin:8px 0 14px; }
@@ -325,6 +331,7 @@
       <button v-if="ov.caps && ov.caps.lan" class="btn" :class="{green: hp.lan}" @click="openLan" title="同一個 Wi-Fi 的平板連到這台電腦，兩台看同一份進度">{{ hp.lan ? '平板連線中' : '平板連線' }}</button>
       <button v-if="ov.local !== false" class="btn" @click="endReview" :disabled="busy">結束審稿</button>
       <label v-if="ov.local !== false" class="btn" style="cursor:pointer" title="選另一台（平板或電腦）寄回的「審稿結果」檔，接著那邊的進度審">接續另一台<input type="file" accept=".zip" style="display:none" @change="loadPack"></label>
+      <button v-if="ov.local !== false" class="btn" @click="xferOpen" title="電腦和平板不在同一個網路時，用 QR code 把進度傳到另一台">QR 互傳</button>
       <button v-if="ov.local !== false" class="btn green" @click="sendBack" :disabled="busy">寄回結果<template v-if="hp.unsent.length">（{{ hp.unsent.length }} 篇）</template></button>
     </div>
     <div class="right" v-else>
@@ -1076,8 +1083,52 @@
         <button class="btn green" style="font-size:16px; padding:10px 24px" @click="startHelper" :disabled="!nameInput.trim() || !hp.pack_id">開始審稿</button>
         <label class="btn" style="cursor:pointer">{{ hp.pack_id ? '打開新的審稿包' : '打開審稿包' }}<input type="file" accept=".zip" style="display:none" @change="loadPack"></label>
       </div>
-      <div class="muted" style="font-size:12px; margin-top:8px" v-if="hp.pack_id">收到新的審稿包時按「打開新的審稿包」，你現在的進度會先幫你保留起來。<br>平板和電腦在同一個 Wi-Fi：在電腦上按右上角「平板連線」，平板掃 QR code 就能看同一份進度。<br>不在同一個網路時輪流審：在一台按「寄回結果」，把檔案傳給自己，到另一台按這個按鈕選那個「審稿結果」檔，就接著上次的進度。</div>
+      <div class="muted" style="font-size:12px; margin-top:8px" v-if="hp.pack_id">收到新的審稿包時按「打開新的審稿包」，你現在的進度會先幫你保留起來。<br>平板和電腦在同一個 Wi-Fi：在電腦上按右上角「平板連線」，平板掃 QR code 就能看同一份進度。<br>不在同一個網路時輪流審：兩台都打開同一個審稿包，在一台按右上角「QR 互傳」→「傳出去」，另一台按「QR 互傳」→「接收」，用相機對準畫面；或在一台按「寄回結果」，把檔案傳給自己，到另一台按這個按鈕選那個「審稿結果」檔。</div>
       <div class="muted" style="font-size:12px; margin-top:10px; padding-top:8px; border-top:1px solid #f0ece4">審稿程式 {{ ov.version }}<template v-if="hp.launcher">（開始審稿.exe 外殼 {{ hp.launcher }}）</template>・<a href="manual" target="_blank">完整使用手冊</a></div>
+    </div>
+  </div>
+
+  <!-- 小幫手：QR code 互傳（不在同一個網路的電腦與平板） -->
+  <div class="modal-bg" v-if="xfer" @click.self="xferClose">
+    <div class="modal" style="max-width:680px">
+      <h2>用 QR code 把進度傳到另一台</h2>
+      <template v-if="xfer.mode === 'menu'">
+        <p style="margin:0 0 10px; line-height:1.7">兩台要先打開同一個審稿包。傳的是你在這台的全部進度（判斷、註解、改過的字），另一台收到後會接著審，跟「接續另一台」一樣。不需要網路，也不會寄給 {{ hp.owner }}。</p>
+        <div style="display:flex; gap:12px; flex-wrap:wrap">
+          <button class="btn green" style="font-size:16px; padding:10px 20px" @click="xferSend">傳出去（這台顯示 QR code）</button>
+          <button class="btn" style="font-size:16px; padding:10px 20px" @click="xferRecv">接收（用這台的相機掃）</button>
+        </div>
+        <p class="muted" style="font-size:12px; margin:10px 0 0">平板用後鏡頭對準電腦螢幕；電腦要接收的話需要視訊鏡頭，把平板螢幕對著鏡頭。</p>
+      </template>
+      <template v-else-if="xfer.mode === 'send'">
+        <p v-if="xfer.loading" class="muted">準備中…</p>
+        <p v-else-if="xfer.err" style="color:#b3261e">{{ xfer.err }}</p>
+        <template v-else>
+          <p style="margin:0 0 4px; line-height:1.6">在另一台按「QR 互傳」→「接收」，相機對準這裡。QR code 會一直輪播，對方收齊就好，漏掉的下一輪會補到。</p>
+          <canvas ref="xferCanvas" class="xfer-qr" width="560" height="560" aria-label="輪播中的 QR code"></canvas>
+          <div class="muted" style="text-align:center">共 {{ xfer.n }} 張，現在第 {{ xfer.shown }} 張（{{ Math.round(xfer.bytes / 1024) }} KB）</div>
+          <div style="display:flex; gap:8px; justify-content:center; align-items:center; margin-top:8px; flex-wrap:wrap">
+            <span class="muted">對方讀不到時：</span>
+            <button class="btn" :class="{green: xfer.speed === 'slow'}" @click="xferTune('slow')">放慢</button>
+            <button class="btn" :class="{green: xfer.speed === 'small'}" @click="xferTune('small')">每張少一點（比較好讀，張數變多）</button>
+            <button class="btn" :class="{green: xfer.speed === 'normal'}" @click="xferTune('normal')">一般</button>
+          </div>
+        </template>
+      </template>
+      <template v-else>
+        <p v-if="xfer.err" style="color:#b3261e">{{ xfer.err }}</p>
+        <template v-if="!xfer.done">
+          <p style="margin:0 0 6px; line-height:1.6">在另一台按「QR 互傳」→「傳出去」，把那台的畫面放進下面的框裡，保持不動。</p>
+          <video ref="xferVideo" class="xfer-cam" muted playsinline autoplay></video>
+          <div class="xfer-bar"><div :style="{width: (xfer.n ? 100 * xfer.got / xfer.n : 0) + '%'}"></div></div>
+          <div class="muted">{{ xfer.n ? `已收到 ${xfer.got} / ${xfer.n} 張` + (xfer.got < xfer.n ? `，還差 ${xfer.n - xfer.got} 張` : '') : '還沒看到 QR code' }}</div>
+        </template>
+        <p v-else>收齊了，正在接上進度…</p>
+      </template>
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px">
+        <button class="btn" v-if="xfer.mode !== 'menu'" @click="xferOpen">回上一步</button>
+        <button class="btn" @click="xferClose">關閉</button>
+      </div>
     </div>
   </div>
 
@@ -2199,7 +2250,9 @@ createApp({
     async function loadPack(e) {
       const file = e.target.files[0]; e.target.value = '';
       if (!file) return;
-      const buf = await file.arrayBuffer();
+      await openPackBytes(await file.arrayBuffer());
+    }
+    async function openPackBytes(buf) {
       const send = (older) => fetch('/api/helper/load-pack' + (older ? '?older=1' : ''), { method: 'POST', headers: { 'Content-Type': 'application/zip', 'X-Workbench': '1' }, body: buf }).then(x => x.json()).catch(() => ({ error: '審稿程式沒有回應' }));
       busy.value = true; say('打開審稿包中…');
       let r = await send(false);
@@ -2232,6 +2285,117 @@ createApp({
       };
       setTimeout(wait, 1500);
     }
+
+    // ---- QR code 互傳：電腦和平板不在同一個網路時，把「接續另一台」用的進度用一串 QR code 傳過去 ----
+    // 每張：CHT1|檔案的 CRC32|第幾張|共幾張|base64 片段。傳的那邊一直輪播，收的那邊每張收過一次就好，收齊後檢查 CRC32
+    const xfer = ref(null), xferCanvas = ref(null), xferVideo = ref(null);
+    let xferTimer = 0, xferStream = null, xferRaf = 0, xferFrames = [], xferBytes = null;
+    const XFER_SET = { normal: { chunk: 700, ms: 170 }, slow: { chunk: 700, ms: 400 }, small: { chunk: 350, ms: 250 } };
+    const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+    function crc32(u8) { let c = 0xffffffff; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 0xff] ^ (c >>> 8); return ((c ^ 0xffffffff) >>> 0).toString(16).padStart(8, '0'); }
+    function toB64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
+    function fromB64(s) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+    function xferStop() {
+      clearInterval(xferTimer); xferTimer = 0;
+      cancelAnimationFrame(xferRaf); xferRaf = 0;
+      if (xferStream) { xferStream.getTracks().forEach(tr => tr.stop()); xferStream = null; }
+    }
+    function xferOpen() { xferStop(); xfer.value = { mode: 'menu' }; }
+    function xferClose() { xferStop(); xfer.value = null; }
+    function xferDraw(text) {
+      const cv = xferCanvas.value;
+      if (!cv || typeof qrcode !== 'function') return;
+      const q = qrcode(0, 'L'); q.addData(text); q.make();
+      const n = q.getModuleCount(), cell = Math.floor(cv.width / (n + 8)), off = Math.floor((cv.width - cell * n) / 2);
+      const g = cv.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.fillStyle = '#000';
+      for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) g.fillRect(off + c * cell, off + r * cell, cell, cell);
+    }
+    function xferPlay() {
+      clearInterval(xferTimer);
+      const set = XFER_SET[xfer.value.speed], s = toB64(xferBytes), id = crc32(xferBytes);
+      const n = Math.max(1, Math.ceil(s.length / set.chunk));
+      xferFrames = Array.from({ length: n }, (_, i) => `CHT1|${id}|${i}|${n}|${s.slice(i * set.chunk, (i + 1) * set.chunk)}`);
+      xfer.value.n = n;
+      let i = 0;
+      const step = () => { xferDraw(xferFrames[i % n]); xfer.value.shown = (i % n) + 1; i++; };
+      step();
+      xferTimer = setInterval(step, set.ms);
+    }
+    function xferTune(speed) { if (!xferBytes) return; xfer.value.speed = speed; xferPlay(); }
+    async function xferSend() {
+      xferStop();
+      xfer.value = { mode: 'send', loading: true, err: '', n: 0, shown: 0, bytes: 0, speed: 'normal' };
+      const r = await fetch('/api/helper/handoff', { method: 'POST', headers: { 'X-Workbench': '1' } }).catch(() => null);
+      if (!r || !r.ok) {
+        const j = r ? await r.json().catch(() => ({})) : {};
+        Object.assign(xfer.value, { loading: false, err: j.error || '審稿程式沒有回應' });
+        return;
+      }
+      xferBytes = new Uint8Array(await r.arrayBuffer());
+      Object.assign(xfer.value, { loading: false, bytes: xferBytes.length });
+      await nextTick();
+      xferPlay();
+    }
+    async function xferRecv() {
+      xferStop();
+      xfer.value = { mode: 'recv', err: '', n: 0, got: 0, done: false };
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof jsQR !== 'function') {
+        xfer.value.err = '這個瀏覽器不能用相機。請改用「接續另一台」選檔案。';
+        return;
+      }
+      try {
+        xferStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      } catch (e) {
+        xfer.value.err = '打不開相機：' + (e && e.name === 'NotAllowedError' ? '請在瀏覽器允許使用相機，再按一次「接收」。' : '這台可能沒有相機。請改用「接續另一台」選檔案。');
+        return;
+      }
+      await nextTick();
+      const video = xferVideo.value;
+      if (!video) return xferStop();
+      video.srcObject = xferStream;
+      await video.play().catch(() => {});
+      const cv = document.createElement('canvas'), g = cv.getContext('2d', { willReadFrequently: true });
+      const parts = new Map();
+      let id = '', n = 0;
+      const tick = () => {
+        if (!xferStream) return;
+        if (video.readyState >= 2 && video.videoWidth) {
+          const w = Math.min(960, video.videoWidth), h = Math.round(video.videoHeight * w / video.videoWidth);
+          if (cv.width !== w) { cv.width = w; cv.height = h; }
+          g.drawImage(video, 0, 0, w, h);
+          const code = jsQR(g.getImageData(0, 0, w, h).data, w, h, { inversionAttempts: 'dontInvert' });
+          const f = code && code.data.startsWith('CHT1|') ? code.data.split('|') : null;
+          if (f && f.length === 5) {
+            // 對方換了檔案或改了每張的大小：重新收
+            if (f[1] !== id || Number(f[3]) !== n) { id = f[1]; n = Number(f[3]); parts.clear(); xfer.value.err = ''; }
+            parts.set(Number(f[2]), f[4]);
+            xfer.value.n = n; xfer.value.got = parts.size;
+            if (parts.size === n) return xferFinish(parts, n, id);
+          }
+        }
+        xferRaf = requestAnimationFrame(tick);
+      };
+      xferRaf = requestAnimationFrame(tick);
+    }
+    async function xferFinish(parts, n, id) {
+      let s = '';
+      for (let i = 0; i < n; i++) s += parts.get(i);
+      let bytes = null;
+      try { bytes = fromB64(s); } catch (e) { /* 下面當作收壞了 */ }
+      if (!bytes || crc32(bytes) !== id) {
+        parts.clear();
+        xfer.value.err = '收到的內容對不起來，重新收一次（不用動，對方會繼續輪播）';
+        xfer.value.got = 0;
+        xferRaf = requestAnimationFrame(() => xferRecvContinue());
+        return;
+      }
+      xferStop();
+      xfer.value.done = true;
+      await openPackBytes(bytes.buffer);
+      xfer.value = null;
+    }
+    function xferRecvContinue() { xferRecv(); }
 
     // ---- 平板連線：同一個 Wi-Fi 的平板連到這台電腦 ----
     const lan = ref(null), lanBusy = ref(false);
@@ -2314,6 +2478,7 @@ createApp({
       takeCite, isHelper, hp, lan, lanBusy, openLan, lanToggle, restartHelper, welcome, sent, askEnd, ending, bye, restoreAsk, helperInfo, packSel, packFull, packComments, packMsg, importRes, dropOver, conflict, choices,
       askRestore, doRestore, fmtDate, loadHelper, packOrder, pickPack, makePack, isIncoming, pickResult, dropResult, openConflict, resolveConflict, discardConflict, markDiff,
       helperLabel, listGroups, navList, lastSaved, startHelper, sendBack, openFolder, endReview, quitHelper, loadPack,
+      xfer, xferCanvas, xferVideo, xferOpen, xferClose, xferSend, xferRecv, xferTune,
     };
   }
 }).mount('#app');

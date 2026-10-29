@@ -85,7 +85,7 @@ HELPER_DIR = ROOT / "build" / "helper"   # 產生的審稿包與 exe（build/ �
 OWNER_NAME = "Chen-MouChin"
 # 審稿程式的版本。改了小幫手看得到的功能就加一版，並同步更新 workbench/helper/使用手冊.txt 的版本與更新紀錄
 # （test_workbench.py 會檢查兩邊一致）
-VERSION = "1.8"
+VERSION = "1.9"
 # 開始審稿.exe 外殼的版本（helper_main.py 的 LAUNCHER 設進環境變數）；外殼太舊、跑不動審稿包附的新程式時，
 # 會改跑 exe 內建的舊程式，並在畫面上請小幫手跟負責人要完整版審稿包
 LAUNCHER = os.environ.get("WB_LAUNCHER", "")
@@ -1066,6 +1066,14 @@ def helper_export(suffix: str = "") -> dict:
     return {"ok": True, "file": out.name, "path": str(out), "folder": str(out.parent), "counts": counts}
 
 
+def helper_handoff() -> bytes:
+    """給另一台接著審的進度（用 QR code 傳）：內容和寄回結果一樣，但不存到「下載」、也不算寄回給負責人。"""
+    name = helper_name() or "小幫手"
+    data, _ = pack.make_result(ROOT, STORE.all(), name, all_slugs(), app_version=VERSION,
+                               launcher=LAUNCHER or ("web" if WEB else ""))
+    return data
+
+
 def helper_continue(data: bytes) -> dict:
     """小幫手在另一台裝置（平板／電腦）寄回的結果，在這台接著審：審稿紀錄合併，改過的文章套進來。
     兩台要先打開同一個審稿包。兩邊改到同一段時用匯入的版本，這台原本的進度先存一份到「下載」。"""
@@ -1656,7 +1664,8 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/helper/ping":
             return self._json({"ok": True})
         # 這幾個只給電腦本機：平板連進來時不能關掉電腦上的程式、開關區網入口
-        local_only = ("/api/helper/lan", "/api/helper/restart", "/api/helper/quit", "/api/helper/open-folder")
+        local_only = ("/api/helper/lan", "/api/helper/restart", "/api/helper/quit", "/api/helper/open-folder",
+                      "/api/helper/handoff")
         if path in local_only and not self._is_local():
             return self._json({"error": "這個要在電腦上按"}, 403)
         if path == "/api/helper/lan":
@@ -1670,6 +1679,17 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"ok": True, "name": name})
         if path == "/api/helper/export":
             return self._json(helper_export())
+        if path == "/api/helper/handoff":
+            if not (ROOT / "pack.json").exists():
+                return self._json({"error": "還沒有打開審稿包"}, 400)
+            data = helper_handoff()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path == "/api/helper/open-folder":
             f = pack.helper_state(ROOT).get("last_export_file", "")
             open_folder(f if f and Path(f).exists() else str(pack.downloads_dir()))
