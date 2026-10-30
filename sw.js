@@ -1,7 +1,7 @@
 // 平板版審稿的 service worker：
 // 1. 把審稿程式和 Pyodide 存進快取，第一次開過之後沒有網路也能用
 // 2. iframe 裡的網站預覽（…/site/…、…/manual）轉給頁面裡的 Python 回答
-const CACHE = 'cat-review-f0015a6bf7';
+const CACHE = 'cat-review-8f60c955aa';
 const SCOPE = new URL('./', self.location).pathname;          // /cat-health-tw-workbench/
 const PYODIDE = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
 
@@ -38,11 +38,14 @@ async function precache() {
   await Promise.allSettled(jobs);
 }
 
-self.addEventListener('install', (e) => { e.waitUntil(precache().catch(() => {})); self.skipWaiting(); });
+// 安裝不等下載：Pyodide 十幾 MB，等它存完才接手的話，畫面會先開、預覽跑去 GitHub 拿到 404（2026-10-30 平板實測）
+// 改成先接手頁面，再在背景存快取；頁面自己下載 Pyodide 時也會經過 cached() 存起來
+self.addEventListener('install', () => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
     for (const k of await caches.keys()) if (k.startsWith('cat-review-') && k !== CACHE) await caches.delete(k);
     await self.clients.claim();
+    await precache().catch(() => {});
   })());
 });
 

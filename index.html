@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta name="robots" content="noindex, nofollow">
-<script src="shim.js?v=f0015a6bf7"></script>
+<script src="shim.js?v=8f60c955aa"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貓健康站 工作檯</title>
@@ -349,11 +349,32 @@
   body.phone .check .opts button { padding:6px 10px; font-size:13px; }
   body.phone .pane textarea { font-size:16px; }
   body.phone .toast { left:12px; right:12px; bottom:88px; max-width:none; }
+
+  /* 平板版（寬度 701～1199，body.tablet，2026-10-30 iPad 實測後加）：頁首一列不換行、不透明，審稿區剛好填滿螢幕不讓整頁捲動。
+     橫向（1000 以上）：清單｜文章｜側欄，清單可以收起來；直向：文章佔滿，清單從左邊、側欄從右邊拉出來 */
+  body.tablet header.top { flex-wrap:nowrap; overflow-x:auto; background:#fff; gap:10px; padding:6px 12px; scrollbar-width:none; }
+  body.tablet header.top::-webkit-scrollbar { display:none; }
+  body.tablet header.top > * { flex:none; }
+  body.tablet nav.tabs { flex-wrap:nowrap; margin-left:0; }
+  body.tablet .right { margin-left:auto; }
+  body.tablet .right .autosave { display:none; }
+  body.tablet main { padding:8px; }
+  body.tablet .review { height:calc(100dvh - var(--hh, 52px) - 16px); gap:8px; grid-template-columns:260px minmax(0,1fr) 340px; }
+  body.tablet .review.nolist { grid-template-columns:minmax(0,1fr) 340px; }
+  body.tablet .review > .col:first-child { max-height:none; }
+  body.tablet .center { height:auto; }
+  body.tablet .seg button, body.tablet .stabs button { padding:7px 12px; }
+  .tdrawer-bg { position:fixed; inset:0; z-index:30; background:rgba(29,29,31,.35); }
+  body.tport .review { grid-template-columns:minmax(0,1fr); }
+  body.tport .review.hascur > .col.tl, body.tport .review > .col.side { position:fixed; top:0; bottom:0; z-index:31; max-height:none; border-radius:0; box-shadow:0 0 24px rgba(0,0,0,.18); }
+  body.tport .review.hascur > .col.tl { left:0; width:min(380px, 86vw); }
+  body.tport .review > .col.side { right:0; width:min(440px, 90vw); }
+  body.tport .stabs .x { flex:none; width:52px; font-size:20px; }
 </style>
 </head>
 <body>
 <div id="app" v-cloak>
-  <header class="top">
+  <header class="top" ref="hdr">
     <img src="site/images/logo/lockup-horizontal.svg" alt="貓健康站">
     <span class="t">{{ isHelper ? '審稿' : '工作檯' }}</span>
     <div class="hbar" v-if="isHelper && hp">
@@ -363,7 +384,7 @@
       <button v-for="t in tabs" :key="t.id" :class="{on: tab===t.id}" @click="go(t.id)">{{ t.label }}<span v-if="t.badge" class="badge">{{ t.badge }}</span></button>
     </nav>
     <div class="right" v-if="isHelper && hp">
-      <span :class="{ok: lastSaved}">{{ lastSaved ? '✓ 已自動儲存・' + lastSaved.at : '做的每個動作都會自動儲存' }}</span>
+      <span class="autosave" :class="{ok: lastSaved}">{{ lastSaved ? '✓ 已自動儲存・' + lastSaved.at : '做的每個動作都會自動儲存' }}</span>
       <a href="#" class="muted" @click.prevent="welcome=true">怎麼用</a>
       <button v-if="ov.caps && ov.caps.lan" class="btn" :class="{green: hp.lan}" @click="openLan" title="同一個 Wi-Fi 的平板連到這台電腦，兩台看同一份進度">{{ hp.lan ? '平板連線中' : '平板連線' }}</button>
       <button v-if="ov.local !== false" class="btn" @click="endReview" :disabled="busy">結束審稿</button>
@@ -458,8 +479,9 @@
     </section>
 
     <!-- 文章審核 -->
-    <section v-if="tab==='review'" class="review">
-      <div class="col" v-if="!phone || !cur || plist">
+    <section v-if="tab==='review'" class="review" :class="{nolist: tablet && !tport && cur && !tlist, hascur: !!cur}">
+      <div class="tdrawer-bg" v-if="tport && cur && (tlist || tside)" @click="tlist=false; tside=false"></div>
+      <div class="col tl" v-if="phone ? (!cur || plist) : (!tablet || !cur || tlist)">
         <div class="queue">
           <button v-for="q in queues" :key="q.id" :class="{on: fq===q.id}" @click="fq=q.id">{{ q.label }} {{ q.n }}</button>
         </div>
@@ -487,7 +509,7 @@
         <div v-if="!filtered.length" class="muted" style="padding:16px 12px">這個分類目前沒有文章。</div>
       </div>
 
-      <div class="col center" v-if="!phone || (cur && !plist)">
+      <div class="col center" v-if="phone ? (cur && !plist) : (!tport || cur)">
         <template v-if="cur">
           <div class="ptop" v-if="phone">
             <button @click="plist=true; sheet=''">‹ 清單</button>
@@ -495,11 +517,13 @@
             <span class="pill" :class="'st-'+cur.review.stage">{{ isHelper ? helperLabel(cur.review) : cur.review.stage_label }}</span>
           </div>
           <div class="seg" v-if="!phone">
+            <button v-if="tablet" @click="tlist=!tlist; tside=false">{{ tlist && !tport ? '‹ 收起清單' : '☰ 清單' }}</button>
             <button :class="{on: view==='read'}" @click="setView('read')">閱讀</button>
             <button :class="{on: view==='edit'}" @click="setView('edit')">編輯內文</button>
             <button :class="{on: view==='history'}" @click="setView('history')">修改紀錄 {{ cur.review.log.length }}</button>
             <span class="hint" v-if="lastSaved && lastSaved.slug === cur.slug" style="color:var(--green); font-weight:600">✓ {{ lastSaved.what }} {{ lastSaved.at }}</span>
-            <span class="hint" v-else-if="view==='read'">反白文字就能加註解</span>
+            <span class="hint" v-else-if="view==='read' && !tport">反白文字就能加註解</span>
+            <button v-if="tport" style="margin-left:auto" @click="tside=true; tlist=false">審稿面板 ›</button>
           </div>
           <iframe v-if="view==='read'" ref="frame" :src="cur.html + '?wb=' + bump + wbTok" @load="onIframeLoad"></iframe>
           <div v-else-if="view==='edit'" class="editor">
@@ -591,7 +615,7 @@
       </nav>
       <div class="psheet-bg" v-if="phone && sheet && cur" @click="sheet=''"></div>
 
-      <div class="col side" v-if="cur && (!phone || (sheet && !plist))">
+      <div class="col side" v-if="cur && (phone ? (sheet && !plist) : (!tport || tside))">
         <div class="stabs">
           <button :class="{on: stab==='review'}" @click="stab='review'">{{ phone ? '檢查清單與判斷' : '審稿' }}</button>
           <button :class="{on: stab==='comments'}" @click="stab='comments'">註解 {{ openComments.length || '' }}</button>
@@ -601,6 +625,7 @@
           <button :class="{on: stab==='more'}" @click="stab='more'">其他</button>
           </template>
           <button v-else class="x" @click="sheet=''" aria-label="關閉">×</button>
+          <button v-if="tport" class="x" @click="tside=false" aria-label="關閉">×</button>
         </div>
 
         <!-- 審稿 -->
@@ -1471,6 +1496,20 @@ createApp({
     const onPhoneMq = (e) => { phone.value = e.matches; };
     if (phoneMq.addEventListener) phoneMq.addEventListener('change', onPhoneMq); else phoneMq.addListener(onPhoneMq);
     watchEffect(() => document.body.classList.toggle('phone', phone.value));
+    // 平板版：寬度 701～1199。tport＝直向（999 以下），清單（tlist）和側欄（tside）改成左右拉出來的抽屜；橫向時 tlist 是清單欄有沒有展開
+    const tabletMq = window.matchMedia('(min-width: 701px) and (max-width: 1199px)'), tportMq = window.matchMedia('(min-width: 701px) and (max-width: 999px)');
+    const tablet = ref(tabletMq.matches), tport = ref(tportMq.matches), tlist = ref(false), tside = ref(false);
+    const onTabletMq = () => { tablet.value = tabletMq.matches; tport.value = tportMq.matches; tside.value = false; };
+    for (const mq of [tabletMq, tportMq]) { if (mq.addEventListener) mq.addEventListener('change', onTabletMq); else mq.addListener(onTabletMq); }
+    watchEffect(() => { document.body.classList.toggle('tablet', tablet.value); document.body.classList.toggle('tport', tport.value); });
+    // 審稿區的高度要扣掉頁首，頁首高度隨按鈕多寡變，量實際高度
+    const hdr = ref(null);
+    onMounted(() => {
+      if (!window.ResizeObserver) return;
+      const setH = () => { if (hdr.value) document.documentElement.style.setProperty('--hh', hdr.value.offsetHeight + 'px'); };
+      new ResizeObserver(setH).observe(document.body); setH();
+    });
+    function showSide() { if (tport.value) { tside.value = true; tlist.value = false; } }
     const activeCid = ref(''), replyTo = ref(''), replyText = ref('');
     const askName = ref(false), nameInput = ref(reviewerName), showGuide = ref(false);
     const dep = ref(null), depOut = ref('');
@@ -1603,6 +1642,7 @@ createApp({
       if (view.value === 'edit') view.value = 'read';
       bump.value++;
       if (stab.value === 'more') stab.value = 'review';
+      if (tport.value) { tlist.value = false; tside.value = false; }
       if (phone.value) { plist.value = false; sheet.value = ''; if (!['review', 'comments'].includes(stab.value)) stab.value = 'review'; view.value = 'read'; window.scrollTo(0, 0); }
     }
     // ---- 手機版的底部判定列 ----
@@ -1969,6 +2009,7 @@ createApp({
       draft.value = { open: true, quote, text: '', suggestion: '' };
       stab.value = 'comments';
       if (phone.value) sheet.value = 'comments';
+      showSide();
       nextTick(() => draftBox.value && draftBox.value.focus());
     }
     function closeDraft() { draft.value = { open: false, quote: '', text: '', suggestion: '' }; }
@@ -2011,7 +2052,7 @@ createApp({
           const mark = doc.createElement('mark');
           mark.className = 'wb-hl'; mark.dataset.cid = c.id; mark.title = c.who + '：' + (c.text || c.suggestion);
           range.surroundContents(mark);
-          mark.addEventListener('click', () => { stab.value = 'comments'; if (phone.value) sheet.value = 'comments'; activeCid.value = c.id; nextTick(() => { const el = document.getElementById('cmt-' + c.id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }); });
+          mark.addEventListener('click', () => { stab.value = 'comments'; if (phone.value) sheet.value = 'comments'; showSide(); activeCid.value = c.id; nextTick(() => { const el = document.getElementById('cmt-' + c.id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }); });
           break;
         }
       }
@@ -2085,7 +2126,7 @@ createApp({
           ev.preventDefault();
           // 手機沒有文獻分頁：點註腳就在原地顯示文獻名稱和摘要開頭，幾秒後收起
           if (phone.value) { showTip(); clearTimeout(link._tipT); link._tipT = setTimeout(() => tip.classList.remove('show'), 5000); return; }
-          stab.value = 'cites';
+          stab.value = 'cites'; showSide();
           nextTick(() => { const el = document.getElementById('cite-card-' + link.getAttribute('data-cite')); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.style.boxShadow = '0 0 0 2px #b8860b'; setTimeout(() => el.style.boxShadow = '', 1500); } });
         });
       });
@@ -2615,7 +2656,7 @@ createApp({
 
     return {
       ov, arts, cur, bump, activity, isOwner, me, tabs, tab, view, stab, rawContent, rawOrig, editErr, fq, fc, fs, stageNote, draft, draftBox, frame, nameBox, noteBox,
-      phone, plist, sheet, sheetOpen, phoneComment, phonePass, phoneChanges, wbTok,
+      phone, plist, sheet, sheetOpen, phoneComment, phonePass, phoneChanges, wbTok, tablet, tport, tlist, tside, hdr,
       activeCid, replyTo, replyText, askName, nameInput, showGuide, dep, depOut, cites, cs, cq, onlyCited, out, git, msg, busy, toast, toastErr,
       pct, fmtTime, fmtAgo, fmtCtx, citeLabel, titleOf, diffLines, categories, queues, filtered, openComments, resolvedComments, chk, checkedCount, canPass, passWhy, steps, quoteInRaw,
       citesFiltered: computed(() => cites.value.filter(c => (!onlyCited.value || c.cited_by.length) && (!cq.value || c.key.includes(cq.value) || (c.title || '').includes(cq.value) || (c.title_zh || '').includes(cq.value)))),

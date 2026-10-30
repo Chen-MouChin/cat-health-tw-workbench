@@ -190,6 +190,10 @@
 
   // ---------- 網站預覽（iframe 裡的 site/…）由 service worker 轉過來 ----------
   if ('serviceWorker' in navigator) {
+    // service worker 晚一步接手時，已經開著的預覽是直接向 GitHub 要的（404），接手後重載一次
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      document.querySelectorAll('iframe, img[src*="site/"]').forEach(function (f) { if (f.src) f.src = f.src; });
+    });
     navigator.serviceWorker.addEventListener('message', async function (ev) {
       if (!ev.data || ev.data.type !== 'tb-site') return;
       var port = ev.ports[0];
