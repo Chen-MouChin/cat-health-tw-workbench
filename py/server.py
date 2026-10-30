@@ -1250,6 +1250,8 @@ def open_app_window(url: str) -> None:
 
 # 區網模式的設定，main() 啟動時填入
 ACCESS = {"token": "", "hosts": set()}
+# 負責人用 --lan 開的時候，給小幫手的網址與憑證指紋；只回給本機的負責人，讓畫面顯示網址和 QR code
+OWNER_LAN = {"url": "", "fp": ""}
 OWNER_ONLY = ("/api/git/commit", "/api/git/push", "/api/deploy", "/api/session", "/api/quit")
 # 負責人的工作階段：停在哪個分頁、哪一篇、篩選條件；下次打開工作檯接著做（research/ 不進 git）
 SESSION_FILE = RESEARCH / "reviews" / "_owner_session.json"
@@ -1442,6 +1444,13 @@ class Handler(SimpleHTTPRequestHandler):
         if host not in ACCESS["hosts"]:
             self._json({"error": "Host not allowed"}, 403)
             return False
+        # 通行碼可以在網址、cookie，或同一個工作檯頁面的 Referer 網址裡（2026-10-30）：
+        # 手機用相機或其他 App 打開、又是自簽憑證時，Safari 和 Chrome 都可能不把 cookie 帶回來，
+        # 網頁就留著 ?t= 在網址上，頁面載入的 js、圖、API 請求從 Referer 帶到通行碼
+        if not query_token:
+            ref = urllib.parse.urlsplit(self.headers.get("Referer", ""))
+            if ref.netloc.lower() == host:
+                query_token = urllib.parse.parse_qs(ref.query).get("t", [""])[0]
         self.role = client_role(self.client_address[0], self.headers.get("Cookie", ""), query_token)
         name = urllib.parse.unquote(self.headers.get("X-Reviewer", "")).strip()
         name = re.sub(r"[\x00-\x1f<>]", "", name)[:20]
@@ -1475,7 +1484,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _file(self, path: Path):
+    def _file(self, path: Path, cookie: str = ""):
         if not path.is_file():
             self.send_error(404)
             return
@@ -1484,6 +1493,10 @@ class Handler(SimpleHTTPRequestHandler):
             ctype += "; charset=utf-8"
         data = path.read_bytes()
         self.send_response(200)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+            # 網址帶通行碼，不讓它經由 Referer 跑到別的網站
+            self.send_header("Referrer-Policy", "same-origin")
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
@@ -1520,12 +1533,9 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             if path in ("/", "/index.html"):
                 if qs.get("t") and self.role == "reviewer":
-                    # 通行碼換成 cookie，網址列不留通行碼
-                    self.send_response(303)
-                    self.send_header("Set-Cookie", f"wb_token={ACCESS['token']}; HttpOnly; Secure; SameSite=Strict; Path=/")
-                    self.send_header("Location", "/")
-                    self.end_headers()
-                    return
+                    # 通行碼存成 cookie，但網址上的 ?t= 留著（不轉址）：手機瀏覽器不收 cookie 時，
+                    # 頁面靠網址和 Referer 上的通行碼照樣能用。SameSite=Lax，從相機、LINE 打開也帶得回來
+                    return self._file(WB / "index.html", cookie=f"wb_token={ACCESS['token']}; HttpOnly; Secure; SameSite=Lax; Path=/")
                 return self._file(WB / "index.html")
             if path == "/manual":
                 # 使用手冊（純文字）；exe 裡放在程式旁邊，原始碼在 workbench/helper/
@@ -1565,6 +1575,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({**overview(), "role": self.role, "who": self.who, "owner": OWNER_NAME,
                                    "code_stale": not FROZEN and code_sig() != CODE_SIG, "version": VERSION,
                                    "caps": caps, "local": local,
+                                   "lan_share": dict(OWNER_LAN) if self.role == "owner" and local and OWNER_LAN["url"] else None,
                                    "helper": {**helper_info(), "lan": HELPER_LAN["url"] if local else "",
                                               "lan_fp": HELPER_LAN["fp"] if local else "", "launcher": LAUNCHER,
                                               "app_fallback": APP_FALLBACK, "web": WEB,
@@ -2008,7 +2019,9 @@ def main() -> int:
         servers.append(lan)
         ACCESS["token"] = secrets.token_urlsafe(12)
         ACCESS["hosts"].add(f"{ip}:{args.port}")
-        print(f" 區網審稿網址（給小幫手，含通行碼，每次啟動都會換）：https://{ip}:{args.port}/?t={ACCESS['token']}")
+        OWNER_LAN.update(url=f"https://{ip}:{args.port}/?t={ACCESS['token']}", fp=fp)
+        print(f" 區網審稿網址（給小幫手，含通行碼，每次啟動都會換）：{OWNER_LAN['url']}")
+        print(" 工作檯畫面右上角「給小幫手的網址」有同一個網址和 QR code。")
         print(f" 憑證指紋 SHA-256：{fp}")
         print(" 第一次開會出現「連線不是私人連線」：先在瀏覽器的憑證資訊比對上面的指紋，一樣再按「繼續前往」。")
         print(" 小幫手可以審文章、核對文獻、重建預覽；commit、push、部署只能在這台電腦操作。")

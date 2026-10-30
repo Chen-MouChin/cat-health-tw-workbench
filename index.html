@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta name="robots" content="noindex, nofollow">
-<script src="shim.js?v=aa2bbab949"></script>
+<script src="shim.js?v=f0015a6bf7"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貓健康站 工作檯</title>
@@ -100,6 +100,10 @@
   @media (prefers-reduced-motion: reduce) { .spin { animation:none; border-right-color:currentColor; opacity:.5; } }
   button.btn.done { background:var(--green-bg); border-color:var(--green); color:var(--green); }
   button.btn.done:disabled { opacity:1; }
+  /* 開啟原文、PDF：土黃底黑字（2026-10-30 負責人指定）；已核准的文獻：實心綠底 */
+  a.btn.open-src { background:#d6a93a; border-color:#c39628; color:#1d1d1f; font-weight:600; }
+  a.btn.open-src:hover { background:#c99c2e; }
+  button.btn.approved, button.btn.approved:disabled { background:var(--green); border-color:var(--green); color:#fff; opacity:1; }
   button.btn.dirty { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold) inset; }
   .card.cite-card { transition:box-shadow .3s, border-color .3s; }
   .card.cite-card.flash-ok { box-shadow:0 0 0 2px var(--green); }
@@ -312,6 +316,39 @@
     .center { height:75vh; }
     .grid2 { grid-template-columns:1fr; }
   }
+
+  /* 手機版（寬度 700 以下，body.phone）：一次一個畫面（清單或文章），底部固定判定列，側欄改成從下方拉出的面板。
+     只能讀、加註解、勾檢查清單、按通過或需修改；編輯內文、文獻核對、評級留給電腦 */
+  body.phone main { padding:8px 8px 84px; }
+  body.phone header.top { padding:6px 10px; gap:8px; }
+  body.phone header.top img { height:22px; }
+  body.phone nav.tabs { display:none; }
+  body.phone .review { display:block; height:auto; }
+  body.phone .review > .col:first-child { max-height:none; }
+  body.phone .queue button { padding:6px 12px; font-size:14px; }
+  body.phone .list-item { padding:12px 14px; }
+  body.phone .list-item .t { font-size:15px; }
+  body.phone .list-item .m { font-size:12px; }
+  body.phone .kbdhint kbd, body.phone .kbdhint .keys { display:none; }
+  body.phone .center { height:calc(100dvh - 150px); }
+  .ptop { display:flex; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid #eee; }
+  .ptop button { flex:none; font:inherit; font-size:14px; border:1px solid var(--border); background:#fff; border-radius:8px; padding:6px 10px; cursor:pointer; }
+  .ptop .pt { flex:1; min-width:0; font-weight:600; font-size:13px; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pbar { position:fixed; left:0; right:0; bottom:0; z-index:20; display:flex; gap:6px; padding:8px 10px calc(8px + env(safe-area-inset-bottom)); background:#fff; border-top:1px solid var(--border); box-shadow:0 -2px 10px rgba(0,0,0,.05); }
+  .pbar button { flex:1; min-width:0; font:inherit; font-size:14px; padding:12px 4px; border-radius:10px; border:1px solid var(--border); background:#fff; color:var(--text); cursor:pointer; }
+  .pbar button.pass { background:var(--green); border-color:var(--green); color:#fff; font-weight:600; }
+  .pbar button.pass.off { background:#fff; color:var(--green); }
+  .pbar button.chg { color:var(--red); font-weight:600; }
+  .pbar button:disabled { opacity:.45; }
+  .psheet-bg { position:fixed; inset:0; z-index:30; background:rgba(29,29,31,.35); }
+  body.phone .col.side { position:fixed; left:0; right:0; bottom:0; z-index:31; max-height:82dvh; border-radius:16px 16px 0 0; border-bottom:0; padding-bottom:env(safe-area-inset-bottom); box-shadow:0 -6px 24px rgba(0,0,0,.18); }
+  body.phone .stabs button { font-size:15px; padding:12px 4px; }
+  body.phone .stabs .x { flex:none; width:52px; font-size:20px; }
+  body.phone .pane { font-size:14px; }
+  body.phone .pane button.btn.sm { padding:7px 12px; font-size:14px; }
+  body.phone .check .opts button { padding:6px 10px; font-size:13px; }
+  body.phone .pane textarea { font-size:16px; }
+  body.phone .toast { left:12px; right:12px; bottom:88px; max-width:none; }
 </style>
 </head>
 <body>
@@ -335,11 +372,12 @@
       <button v-if="ov.local !== false" class="btn green" @click="sendBack" :disabled="busy">寄回結果<template v-if="hp.unsent.length">（{{ hp.unsent.length }} 篇）</template></button>
     </div>
     <div class="right" v-else>
-      <span v-if="ov && isOwner">未 commit {{ ov.git.changed }} 檔 · 上次 build {{ fmtTime(ov.built_at) }}</span>
+      <span v-if="ov && isOwner && !phone">未 commit {{ ov.git.changed }} 檔 · 上次 build {{ fmtTime(ov.built_at) }}</span>
       <span class="me" v-if="ov">{{ isOwner ? '網站負責人' : '審稿' }}：{{ me }} <a v-if="!isOwner" href="#" @click.prevent="askName=true" class="muted" style="font-size:11px">改名</a></span>
-      <button class="btn sm" @click="refreshAll">重新整理</button>
+      <button v-if="ov && ov.lan_share && !phone" class="btn sm green" @click="openShare">給小幫手的網址</button>
+      <button v-if="!phone" class="btn sm" @click="refreshAll">重新整理</button>
       <a href="#" class="muted" @click.prevent="showGuide=true">說明</a>
-      <button v-if="isOwner" class="btn sm" @click="saveAndQuit" :disabled="busy" title="記下現在停在哪個分頁、哪一篇，關掉工作檯；下次打開接著做">儲存並結束</button>
+      <button v-if="isOwner && !phone" class="btn sm" @click="saveAndQuit" :disabled="busy" title="記下現在停在哪個分頁、哪一篇，關掉工作檯；下次打開接著做">儲存並結束</button>
     </div>
   </header>
 
@@ -421,7 +459,7 @@
 
     <!-- 文章審核 -->
     <section v-if="tab==='review'" class="review">
-      <div class="col">
+      <div class="col" v-if="!phone || !cur || plist">
         <div class="queue">
           <button v-for="q in queues" :key="q.id" :class="{on: fq===q.id}" @click="fq=q.id">{{ q.label }} {{ q.n }}</button>
         </div>
@@ -430,7 +468,7 @@
           <button v-if="isOwner" type="button" class="btn sm" @click="sortByRating" :disabled="busy" title="把評過 A、B 級、還沒上線的文章依分數排成優先清單">照評級排序</button>
           <select v-model="fc"><option value="">全部分類</option><option v-for="c in categories" :value="c">{{ c }}</option></select>
         </div>
-        <div class="muted" style="padding:0 12px 8px; font-size:11px">{{ navList.length }} 篇 · <kbd>n</kbd>/<kbd>p</kbd> 上下篇</div>
+        <div class="muted kbdhint" style="padding:0 12px 8px; font-size:11px">{{ navList.length }} 篇<span class="keys"> · <kbd>n</kbd>/<kbd>p</kbd> 上下篇</span></div>
         <template v-for="g in listGroups" :key="g.label">
         <div class="grp" v-if="g.label">{{ g.label }} {{ g.items.length }}</div>
         <div v-for="a in g.items" :key="a.slug" class="list-item" :data-slug="a.slug" :class="{sel: cur && cur.slug===a.slug, dragging: dragSlug===a.slug}" @click="open(a.slug)">
@@ -449,16 +487,21 @@
         <div v-if="!filtered.length" class="muted" style="padding:16px 12px">這個分類目前沒有文章。</div>
       </div>
 
-      <div class="col center">
+      <div class="col center" v-if="!phone || (cur && !plist)">
         <template v-if="cur">
-          <div class="seg">
+          <div class="ptop" v-if="phone">
+            <button @click="plist=true; sheet=''">‹ 清單</button>
+            <span class="pt">{{ cur.frontmatter.title }}</span>
+            <span class="pill" :class="'st-'+cur.review.stage">{{ isHelper ? helperLabel(cur.review) : cur.review.stage_label }}</span>
+          </div>
+          <div class="seg" v-if="!phone">
             <button :class="{on: view==='read'}" @click="setView('read')">閱讀</button>
             <button :class="{on: view==='edit'}" @click="setView('edit')">編輯內文</button>
             <button :class="{on: view==='history'}" @click="setView('history')">修改紀錄 {{ cur.review.log.length }}</button>
             <span class="hint" v-if="lastSaved && lastSaved.slug === cur.slug" style="color:var(--green); font-weight:600">✓ {{ lastSaved.what }} {{ lastSaved.at }}</span>
             <span class="hint" v-else-if="view==='read'">反白文字就能加註解</span>
           </div>
-          <iframe v-if="view==='read'" ref="frame" :src="cur.html + '?wb=' + bump" @load="onIframeLoad"></iframe>
+          <iframe v-if="view==='read'" ref="frame" :src="cur.html + '?wb=' + bump + wbTok" @load="onIframeLoad"></iframe>
           <div v-else-if="view==='edit'" class="editor">
             <div class="ebar">
               <div class="seg2">
@@ -539,13 +582,25 @@
         <div v-else class="muted" style="padding:24px; line-height:1.8">從左邊選一篇文章開始。<br>清單上的顏色是審稿階段：灰色待審、藍色有人在審、紅色需修改、黃色通過、綠色已上線。</div>
       </div>
 
-      <div class="col side" v-if="cur">
+      <!-- 手機：底部判定列；側欄改成從下方拉出的面板 -->
+      <nav class="pbar" v-if="phone && cur && !plist">
+        <button @click="sheetOpen('review')">清單 {{ checkedCount }}/{{ cur.checklist_def.length }}</button>
+        <button @click="phoneComment">{{ '註解' + (openComments.length ? ' ' + openComments.length : '') }}</button>
+        <button class="pass" :class="{off: !canPass}" @click="phonePass" :disabled="busy || cur.review.stage==='approved'">通過</button>
+        <button class="chg" @click="phoneChanges" :disabled="busy || cur.review.stage==='approved'">需修改</button>
+      </nav>
+      <div class="psheet-bg" v-if="phone && sheet && cur" @click="sheet=''"></div>
+
+      <div class="col side" v-if="cur && (!phone || (sheet && !plist))">
         <div class="stabs">
-          <button :class="{on: stab==='review'}" @click="stab='review'">審稿</button>
+          <button :class="{on: stab==='review'}" @click="stab='review'">{{ phone ? '檢查清單與判斷' : '審稿' }}</button>
           <button :class="{on: stab==='comments'}" @click="stab='comments'">註解 {{ openComments.length || '' }}</button>
+          <template v-if="!phone">
           <button :class="{on: stab==='cites'}" @click="stab='cites'">文獻 {{ cur.citations.length }}</button>
           <button :class="{on: stab==='rating'}" @click="stab='rating'">評級 {{ cur.rating && cur.rating.level || '' }}</button>
           <button :class="{on: stab==='more'}" @click="stab='more'">其他</button>
+          </template>
+          <button v-else class="x" @click="sheet=''" aria-label="關閉">×</button>
         </div>
 
         <!-- 審稿 -->
@@ -607,7 +662,7 @@
           <!-- 審稿者的決定 -->
           <div class="decide" v-if="cur.review.stage!=='approved'">
             <h4>{{ isOwner ? '初審' : '你的判斷' }}</h4>
-            <textarea v-model="stageNote" placeholder="給下一位的話（選填；按需修改時要寫原因，或先在文章上加註解）" style="min-height:54px"></textarea>
+            <textarea v-model="stageNote" ref="noteBox" placeholder="給下一位的話（選填；按需修改時要寫原因，或先在文章上加註解）" style="min-height:54px"></textarea>
             <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap">
               <button class="btn green" @click="setStage('passed')" :disabled="busy || !canPass">通過</button>
               <button class="btn danger" @click="setStage('changes')" :disabled="busy">需修改</button>
@@ -616,7 +671,8 @@
           </div>
 
           <!-- 擁有者的決定 -->
-          <div class="decide" v-if="isOwner" style="border-color:var(--gold)">
+          <div class="muted" v-if="isOwner && phone" style="font-size:12px">核准上線、優先與核心的設定請用電腦。</div>
+          <div class="decide" v-if="isOwner && !phone" style="border-color:var(--gold)">
             <h4>上線（只有你看得到）</h4>
             <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; font-size:12px">
               <button class="btn sm" :class="{ green: cur.priority }" @click="togglePriority" :disabled="busy">{{ cur.priority ? '優先第 ' + cur.priority + ' 篇 ✓ 取消' : '設為優先審' }}</button>
@@ -698,11 +754,11 @@
             <div class="ctx" v-for="(ctx, i) in c.contexts" :key="i" v-html="fmtCtx(ctx, c.key)"></div>
             <div v-if="c.found && c.abstract_zh" class="a">{{ c.abstract_zh }}</div>
             <div v-if="c.found && c.url" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
-              <a :href="c.url" target="_blank" rel="noopener" class="btn sm primary" style="color:#fff">開啟原文 ↗</a>
+              <a :href="c.url" target="_blank" rel="noopener" class="btn sm open-src">開啟原文 ↗</a>
               <label style="font-size:12px; cursor:pointer"><input type="checkbox" :checked="c.url_verified" @change="citeSet(c.key, {url_verified: $event.target.checked})"> 我開過原文，網址有效</label>
             </div>
             <div v-if="c.found" style="margin-top:8px; display:flex; gap:6px">
-              <button v-if="isOwner" class="btn sm" @click="citeSet(c.key,{status:'approved', url_verified:true})" :disabled="c.status==='approved'">核准這筆文獻</button>
+              <button v-if="isOwner" class="btn sm" :class="{ approved: c.status==='approved' }" @click="citeSet(c.key,{status:'approved', url_verified:true})" :disabled="c.status==='approved'">{{ c.status==='approved' ? '已核准 ✓' : '核准這筆文獻' }}</button>
               <button class="btn sm" @click="goCite(c.key)">編輯文獻</button>
             </div>
           </div>
@@ -766,8 +822,8 @@
           <span style="font-family:ui-monospace,monospace; font-size:12px">{{ c.key }}</span>
           <span class="pill" :class="'s-'+c.status">{{ citeLabel(c.status) }}</span>
           <span class="muted" style="font-size:12px">{{ c.source }} · {{ c.year }} · 被 {{ c.cited_by.length }} 篇引用</span>
-          <a v-if="c.url" :href="c.url" target="_blank" rel="noopener" style="font-size:12px">原文 ↗</a>
-          <a v-if="c.pdf_url" :href="c.pdf_url" target="_blank" rel="noopener" style="font-size:12px">PDF ↗</a>
+          <a v-if="c.url" :href="c.url" target="_blank" rel="noopener" class="btn sm open-src">原文 ↗</a>
+          <a v-if="c.pdf_url" :href="c.pdf_url" target="_blank" rel="noopener" class="btn sm open-src">PDF ↗</a>
           <label style="font-size:12px"><input type="checkbox" v-model="c.url_verified"> 網址已驗證</label>
           <span style="margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; align-items:center">
             <button class="btn" @click="verify(c)" :disabled="c._v && c._v.running" v-if="ov.caps ? ov.caps.verify : isOwner" title="到原文找摘要裡的每個數字">
@@ -778,7 +834,7 @@
               <span class="spin" v-if="c._save === 'saving' && c._act === 'save'"></span>{{ c._save === 'saving' && c._act === 'save' ? '儲存中…' : (c._save === 'saved' && !citeDirty(c) ? '已儲存 ✓' : '儲存') }}
             </button>
             <template v-if="isOwner">
-              <button class="btn primary" :class="{ done: c.status === 'approved' && !citeDirty(c) }" @click="citeSave(c,'approved','approve')"
+              <button class="btn primary" :class="{ approved: c.status === 'approved' && !citeDirty(c) }" @click="citeSave(c,'approved','approve')"
                       :disabled="!c.url_verified || c._save === 'saving' || (c.status === 'approved' && !citeDirty(c))">
                 <span class="spin" v-if="c._save === 'saving' && c._act === 'approve'"></span>{{ c._save === 'saving' && c._act === 'approve' ? '核准中…' : (c.status === 'approved' && !citeDirty(c) ? '已核准 ✓' : '核准') }}
               </button>
@@ -915,6 +971,7 @@
               把「審稿結果-名字-日期.zip」拖到這裡，或<u>選一個檔案</u>
               <input type="file" accept=".zip" style="display:none" @change="pickResult">
             </label>
+            <button class="btn" style="margin-top:8px" @click="xferImport" :disabled="busy" title="小幫手在旁邊時，她按「QR 互傳」→「傳出去」，用這台的鏡頭掃">用 QR code 收（小幫手在旁邊時）</button>
             <div v-if="importRes" style="margin-top:10px">
               <div style="font-weight:600">{{ importRes.who }} {{ fmtTime(importRes.exported_at).slice(5, 16) }} 寄回的結果<span v-if="importRes.again" class="muted" style="font-weight:400">（這個檔案之前匯入過，沒有重複加）</span></div>
               <div class="irow" v-for="r in importRes.rows" :key="r.slug">
@@ -1091,12 +1148,12 @@
   <!-- 小幫手：QR code 互傳（不在同一個網路的電腦與平板） -->
   <div class="modal-bg" v-if="xfer" @click.self="xferClose">
     <div class="modal" style="max-width:680px">
-      <h2>用 QR code 把進度傳到另一台</h2>
+      <h2>{{ xfer.target === 'import' ? '用 QR code 收小幫手的結果' : '用 QR code 把進度傳到另一台' }}</h2>
       <template v-if="xfer.mode === 'menu'">
         <p style="margin:0 0 10px; line-height:1.7">兩台要先打開同一個審稿包。傳的是你在這台的全部進度（判斷、註解、改過的字），另一台收到後會接著審，跟「接續另一台」一樣。不需要網路，也不會寄給 {{ hp.owner }}。</p>
         <div style="display:flex; gap:12px; flex-wrap:wrap">
           <button class="btn green" style="font-size:16px; padding:10px 20px" @click="xferSend">傳出去（這台顯示 QR code）</button>
-          <button class="btn" style="font-size:16px; padding:10px 20px" @click="xferRecv">接收（用這台的相機掃）</button>
+          <button class="btn" style="font-size:16px; padding:10px 20px" @click="xferRecv('continue')">接收（用這台的相機掃）</button>
         </div>
         <p class="muted" style="font-size:12px; margin:10px 0 0">平板用後鏡頭對準電腦螢幕；電腦要接收的話需要視訊鏡頭，把平板螢幕對著鏡頭。</p>
       </template>
@@ -1118,17 +1175,51 @@
       <template v-else>
         <p v-if="xfer.err" style="color:#b3261e">{{ xfer.err }}</p>
         <template v-if="!xfer.done">
-          <p style="margin:0 0 6px; line-height:1.6">在另一台按「QR 互傳」→「傳出去」，把那台的畫面放進下面的框裡，保持不動。</p>
+          <p style="margin:0 0 6px; line-height:1.6" v-if="xfer.target === 'import'">請小幫手在她的審稿程式按右上角「QR 互傳」→「傳出去」，把她的畫面對著這台的鏡頭，保持不動。收齊後自動匯入，跟拖檔案進來一樣。</p>
+          <p style="margin:0 0 6px; line-height:1.6" v-else>在另一台按「QR 互傳」→「傳出去」，把那台的畫面放進下面的框裡，保持不動。</p>
           <video ref="xferVideo" class="xfer-cam" muted playsinline autoplay></video>
           <div class="xfer-bar"><div :style="{width: (xfer.n ? 100 * xfer.got / xfer.n : 0) + '%'}"></div></div>
           <div class="muted">{{ xfer.n ? `已收到 ${xfer.got} / ${xfer.n} 張` + (xfer.got < xfer.n ? `，還差 ${xfer.n - xfer.got} 張` : '') : '還沒看到 QR code' }}</div>
         </template>
-        <p v-else>收齊了，正在接上進度…</p>
+        <p v-else>{{ xfer.target === 'import' ? '收齊了，正在匯入…' : '收齊了，正在接上進度…' }}</p>
       </template>
       <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px">
-        <button class="btn" v-if="xfer.mode !== 'menu'" @click="xferOpen">回上一步</button>
+        <button class="btn" v-if="xfer.mode !== 'menu' && xfer.target !== 'import'" @click="xferOpen">回上一步</button>
         <button class="btn" @click="xferClose">關閉</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 負責人用區網模式開的時候：給小幫手的網址與 QR code -->
+  <div class="modal-bg" v-if="share" @click.self="share=null">
+    <div class="modal" style="max-width:680px">
+      <h2>給小幫手的網址</h2>
+      <div class="lan-qr">
+        <div class="qr" v-html="share.qr" aria-label="網址的 QR code"></div>
+        <div style="flex:1; min-width:260px">
+          <ol style="margin:0 0 10px; padding-left:18px; line-height:1.8">
+            <li>小幫手的手機連上和這台電腦同一台路由器的 Wi-Fi，再用相機掃左邊的 QR code。</li>
+            <li>出現「連線不是私人連線」時：iPhone 按「顯示詳細資訊」→「造訪此網站」；Android 的 Chrome 按「進階」→「繼續前往」。</li>
+            <li>開過一次，手機會記住通行碼；工作檯重開後網址會換，要重新傳。</li>
+          </ol>
+          <div class="lan-url">{{ share.url }}</div>
+          <div style="display:flex; gap:8px; align-items:center; margin-top:8px">
+            <button class="btn sm" @click="copyShare">{{ share.copied ? '已複製 ✓' : '複製網址' }}</button>
+            <span class="muted" style="font-size:11px; word-break:break-all">憑證指紋 {{ share.fp }}</span>
+          </div>
+        </div>
+      </div>
+      <details style="margin-top:12px">
+        <summary>手機打不開時</summary>
+        <ul style="margin:6px 0 0; padding-left:18px; line-height:1.8; font-size:13px">
+          <li>網址開頭要是 <code>https://</code>，打成 <code>http://</code> 會連不上；最好用 QR code 或複製貼上，通行碼很長，手打容易錯。</li>
+          <li>看手機的 Wi-Fi 詳細資訊：IP 開頭要和網址的前三段一樣。不一樣代表連的是別台路由器或訪客網路。</li>
+          <li>先關掉手機的行動數據，避免手機改走 4G／5G。</li>
+          <li>畫面出現「需要通行碼」：網址的通行碼過期了（工作檯重開過），請用這裡最新的網址。</li>
+          <li>一直轉圈、連線逾時：這台電腦的 Windows 防火牆擋住了，或手機不在同一個網路。</li>
+        </ul>
+      </details>
+      <div style="display:flex; gap:10px; margin-top:14px"><button class="btn" @click="share=null">關閉</button></div>
     </div>
   </div>
 
@@ -1238,7 +1329,7 @@
 </div>
 
 <script>
-const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
+const { createApp, ref, computed, onMounted, watch, watchEffect, nextTick } = Vue;
 const store = {
   get(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
@@ -1370,7 +1461,16 @@ createApp({
     const fq = ref(''), fc = ref(''), fs = ref('');
     const stageNote = ref('');
     const draft = ref({ open: false, quote: '', text: '', suggestion: '' });
-    const draftBox = ref(null), frame = ref(null), nameBox = ref(null);
+    const draftBox = ref(null), frame = ref(null), nameBox = ref(null), noteBox = ref(null);
+    // 區網連進來時網址上的通行碼；預覽 iframe 也帶上，手機不收 cookie 時文章頁的圖和樣式才載得到
+    const wbT = new URLSearchParams(location.search).get('t') || '';
+    const wbTok = wbT ? '&t=' + encodeURIComponent(wbT) : '';
+    // 手機版：寬度 700 以下。plist＝顯示文章清單（否則整頁讀文章），sheet＝下方面板開著哪一頁（'' 是關著）
+    const phoneMq = window.matchMedia('(max-width: 700px)');
+    const phone = ref(phoneMq.matches), plist = ref(true), sheet = ref('');
+    const onPhoneMq = (e) => { phone.value = e.matches; };
+    if (phoneMq.addEventListener) phoneMq.addEventListener('change', onPhoneMq); else phoneMq.addListener(onPhoneMq);
+    watchEffect(() => document.body.classList.toggle('phone', phone.value));
     const activeCid = ref(''), replyTo = ref(''), replyText = ref('');
     const askName = ref(false), nameInput = ref(reviewerName), showGuide = ref(false);
     const dep = ref(null), depOut = ref('');
@@ -1503,7 +1603,40 @@ createApp({
       if (view.value === 'edit') view.value = 'read';
       bump.value++;
       if (stab.value === 'more') stab.value = 'review';
+      if (phone.value) { plist.value = false; sheet.value = ''; if (!['review', 'comments'].includes(stab.value)) stab.value = 'review'; view.value = 'read'; window.scrollTo(0, 0); }
     }
+    // ---- 手機版的底部判定列 ----
+    function sheetOpen(s) { stab.value = s; sheet.value = s; }
+    function phoneComment() {
+      sheetOpen('comments');
+      if (!openComments.value.length && !draft.value.open) startComment('');
+    }
+    async function phonePass() {
+      if (!canPass.value) {
+        const listLeft = checkedCount.value < cur.value.checklist_def.length;
+        sheetOpen(listLeft ? 'review' : 'comments');
+        return say('還不能通過：' + passWhy.value, true);
+      }
+      if (!confirm('確定這篇「通過」？')) return;
+      await setStage('passed'); sheet.value = '';
+    }
+    async function phoneChanges() {
+      if (!openComments.value.length && !stageNote.value.trim()) {
+        sheetOpen('review');
+        nextTick(() => { if (noteBox.value) { noteBox.value.scrollIntoView({ block: 'center' }); noteBox.value.focus(); } });
+        return say('先在下面寫一句需要修改的原因，或在文章上反白加註解');
+      }
+      if (!confirm('確定這篇「需修改」？')) return;
+      await setStage('changes'); sheet.value = '';
+    }
+    // 手機上只有清單和審稿兩個畫面：其他分頁、編輯、修改紀錄都回到閱讀
+    watch(phone, (v) => {
+      if (!v) { sheet.value = ''; return; }
+      if (tab.value !== 'review') go('review');
+      if (cur.value) plist.value = false;
+      if (view.value === 'history') view.value = 'read';
+      if (!['review', 'comments'].includes(stab.value)) stab.value = 'review';
+    });
     async function reload(rebuilt) {
       if (!cur.value) return;
       const d = await api.get('/api/articles/' + cur.value.slug);
@@ -1835,6 +1968,7 @@ createApp({
     function startComment(quote) {
       draft.value = { open: true, quote, text: '', suggestion: '' };
       stab.value = 'comments';
+      if (phone.value) sheet.value = 'comments';
       nextTick(() => draftBox.value && draftBox.value.focus());
     }
     function closeDraft() { draft.value = { open: false, quote: '', text: '', suggestion: '' }; }
@@ -1877,7 +2011,7 @@ createApp({
           const mark = doc.createElement('mark');
           mark.className = 'wb-hl'; mark.dataset.cid = c.id; mark.title = c.who + '：' + (c.text || c.suggestion);
           range.surroundContents(mark);
-          mark.addEventListener('click', () => { stab.value = 'comments'; activeCid.value = c.id; nextTick(() => { const el = document.getElementById('cmt-' + c.id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }); });
+          mark.addEventListener('click', () => { stab.value = 'comments'; if (phone.value) sheet.value = 'comments'; activeCid.value = c.id; nextTick(() => { const el = document.getElementById('cmt-' + c.id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }); });
           break;
         }
       }
@@ -1937,17 +2071,20 @@ createApp({
       const map = {}; cur.value.citations.forEach(c => { map[c.key] = c; });
       doc.querySelectorAll('sup.fn a[data-cite]').forEach(link => {
         const c = map[link.getAttribute('data-cite')];
-        link.addEventListener('mouseenter', () => {
+        const showTip = () => {
           if (!c) return;
           tip.innerHTML = `<b>${esc(c.title_zh || c.title || c.key)}</b>${esc(c.abstract_zh ? c.abstract_zh.slice(0, 110) + '…' : '（沒有摘要）')}`;
           const r = link.getBoundingClientRect();
-          tip.style.left = (r.left + doc.documentElement.scrollLeft) + 'px';
+          tip.style.left = Math.max(8, Math.min(r.left, doc.documentElement.clientWidth - 308)) + doc.documentElement.scrollLeft + 'px';
           tip.style.top = (r.bottom + doc.documentElement.scrollTop + 8) + 'px';
           tip.classList.add('show');
-        });
+        };
+        link.addEventListener('mouseenter', showTip);
         link.addEventListener('mouseleave', () => tip.classList.remove('show'));
         link.addEventListener('click', (ev) => {
           ev.preventDefault();
+          // 手機沒有文獻分頁：點註腳就在原地顯示文獻名稱和摘要開頭，幾秒後收起
+          if (phone.value) { showTip(); clearTimeout(link._tipT); link._tipT = setTimeout(() => tip.classList.remove('show'), 5000); return; }
           stab.value = 'cites';
           nextTick(() => { const el = document.getElementById('cite-card-' + link.getAttribute('data-cite')); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.style.boxShadow = '0 0 0 2px #b8860b'; setTimeout(() => el.style.boxShadow = '', 1500); } });
         });
@@ -2337,9 +2474,10 @@ createApp({
       await nextTick();
       xferPlay();
     }
-    async function xferRecv() {
+    function xferImport() { xferRecv('import'); }
+    async function xferRecv(target) {
       xferStop();
-      xfer.value = { mode: 'recv', err: '', n: 0, got: 0, done: false };
+      xfer.value = { mode: 'recv', err: '', n: 0, got: 0, done: false, target: target === 'import' ? 'import' : 'continue' };
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof jsQR !== 'function') {
         xfer.value.err = '這個瀏覽器不能用相機。請改用「接續另一台」選檔案。';
         return;
@@ -2383,19 +2521,18 @@ createApp({
       for (let i = 0; i < n; i++) s += parts.get(i);
       let bytes = null;
       try { bytes = fromB64(s); } catch (e) { /* 下面當作收壞了 */ }
+      const target = xfer.value.target;
       if (!bytes || crc32(bytes) !== id) {
-        parts.clear();
-        xfer.value.err = '收到的內容對不起來，重新收一次（不用動，對方會繼續輪播）';
-        xfer.value.got = 0;
-        xferRaf = requestAnimationFrame(() => xferRecvContinue());
+        await xferRecv(target);
+        if (xfer.value) xfer.value.err = '收到的內容對不起來，重新收一次（不用動，對方會繼續輪播）';
         return;
       }
       xferStop();
       xfer.value.done = true;
-      await openPackBytes(bytes.buffer);
+      if (target === 'import') await importFile(new Blob([bytes], { type: 'application/zip' }));
+      else await openPackBytes(bytes.buffer);
       xfer.value = null;
     }
-    function xferRecvContinue() { xferRecv(); }
 
     // ---- 平板連線：同一個 Wi-Fi 的平板連到這台電腦 ----
     const lan = ref(null), lanBusy = ref(false);
@@ -2406,6 +2543,18 @@ createApp({
     }
     async function openLan() {
       lan.value = { open: true, on: !!hp.value.lan, url: hp.value.lan, fp: hp.value.lan_fp, qr: hp.value.lan ? qrSvg(hp.value.lan) : '' };
+    }
+    // 負責人區網模式：給小幫手的網址與 QR code（網址只有本機的負責人拿得到）
+    const share = ref(null);
+    async function openShare() {
+      await loadOverview();
+      const s = ov.value && ov.value.lan_share;
+      if (!s) return say('這次不是用區網模式開的；要給小幫手連，請用桌面捷徑或 start-lan.bat 開工作檯', true);
+      share.value = { url: s.url, fp: s.fp, qr: qrSvg(s.url), copied: false };
+    }
+    async function copyShare() {
+      try { await navigator.clipboard.writeText(share.value.url); share.value.copied = true; }
+      catch (e) { say('沒辦法自動複製，請手動選取網址複製', true); }
     }
     async function lanToggle(on) {
       lanBusy.value = true;
@@ -2442,6 +2591,7 @@ createApp({
         if (!hashTab) tab.value = 'review';
       }
       if (['build', 'helper'].includes(tab.value) && !isOwner.value) tab.value = 'review';
+      if (phone.value) tab.value = 'review';
       if (isOwner.value) loadHelper();
       fq.value = isHelper.value ? 'focus' : (isOwner.value && ov.value.review.waiting.length ? 'passed' : 'mine');
       // 網址沒指定分頁時，回到上次停的位置（負責人、小幫手都一樣）
@@ -2464,7 +2614,8 @@ createApp({
     });
 
     return {
-      ov, arts, cur, bump, activity, isOwner, me, tabs, tab, view, stab, rawContent, rawOrig, editErr, fq, fc, fs, stageNote, draft, draftBox, frame, nameBox,
+      ov, arts, cur, bump, activity, isOwner, me, tabs, tab, view, stab, rawContent, rawOrig, editErr, fq, fc, fs, stageNote, draft, draftBox, frame, nameBox, noteBox,
+      phone, plist, sheet, sheetOpen, phoneComment, phonePass, phoneChanges, wbTok,
       activeCid, replyTo, replyText, askName, nameInput, showGuide, dep, depOut, cites, cs, cq, onlyCited, out, git, msg, busy, toast, toastErr,
       pct, fmtTime, fmtAgo, fmtCtx, citeLabel, titleOf, diffLines, categories, queues, filtered, openComments, resolvedComments, chk, checkedCount, canPass, passWhy, steps, quoteInRaw,
       citesFiltered: computed(() => cites.value.filter(c => (!onlyCited.value || c.cited_by.length) && (!cq.value || c.key.includes(cq.value) || (c.title || '').includes(cq.value) || (c.title_zh || '').includes(cq.value)))),
@@ -2475,10 +2626,10 @@ createApp({
       startComment, closeDraft, addComment, sendReply, resolve, delComment, applySugg, focusQuote, onIframeLoad, citeSet, citeSave, citeDirty, verify, goCite, togglePriority, dragSlug, dragStart, nudgePriority, starToggle, coreToggle, rate, sortByRating,
       runBuild, runLint, commit, push, runDeploy, saveName, closeGuide, count,
       askQuit, byeOwner, sessionLabel, saveAndQuit, quitOwner,
-      takeCite, isHelper, hp, lan, lanBusy, openLan, lanToggle, restartHelper, welcome, sent, askEnd, ending, bye, restoreAsk, helperInfo, packSel, packFull, packComments, packMsg, importRes, dropOver, conflict, choices,
+      takeCite, isHelper, hp, lan, lanBusy, openLan, lanToggle, share, openShare, copyShare, restartHelper, welcome, sent, askEnd, ending, bye, restoreAsk, helperInfo, packSel, packFull, packComments, packMsg, importRes, dropOver, conflict, choices,
       askRestore, doRestore, fmtDate, loadHelper, packOrder, pickPack, makePack, isIncoming, pickResult, dropResult, openConflict, resolveConflict, discardConflict, markDiff,
       helperLabel, listGroups, navList, lastSaved, startHelper, sendBack, openFolder, endReview, quitHelper, loadPack,
-      xfer, xferCanvas, xferVideo, xferOpen, xferClose, xferSend, xferRecv, xferTune,
+      xfer, xferCanvas, xferVideo, xferOpen, xferClose, xferSend, xferRecv, xferTune, xferImport,
     };
   }
 }).mount('#app');
