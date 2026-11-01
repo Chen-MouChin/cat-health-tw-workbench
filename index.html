@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta name="robots" content="noindex, nofollow">
-<script src="shim.js?v=8f60c955aa"></script>
+<script src="shim.js?v=ca92f0ff9a"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貓健康站 工作檯</title>
@@ -293,7 +293,10 @@
   .cmt .acts { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
   .cite { border:1px solid var(--border); border-radius:8px; padding:8px 10px; }
   .cite .k { font-family:ui-monospace, monospace; font-size:11px; color:var(--muted); }
-  .cite .a { font-size:12px; color:#444; margin-top:6px; max-height:7em; overflow:auto; border-left:3px solid var(--gold); padding:4px 8px; background:#faf9f6; line-height:1.5; }
+  .cite .a { font-size:12px; color:#444; margin-top:6px; max-height:7em; overflow:hidden; border-left:3px solid var(--gold); padding:4px 8px; background:#faf9f6; line-height:1.5; cursor:pointer; white-space:pre-wrap; }
+  .cite .a.open { max-height:none; cursor:default; }
+  .cite .a-hint { font-size:12px; color:var(--muted); cursor:pointer; margin-top:2px; user-select:none; }
+  .cite .a-hint:hover { color:var(--text); }
   .ctx { margin-top:6px; padding:5px 8px; border-left:3px solid var(--faint); font-size:12px; color:#444; line-height:1.5; }
   .notes { white-space:pre-wrap; font-size:12px; line-height:1.55; background:#fbf7ee; border-left:3px solid var(--gold); padding:8px 10px; border-radius:0 6px 6px 0; max-height:40vh; overflow:auto; }
   .feed .row { display:flex; gap:8px; padding:6px 0; border-bottom:1px solid #f0ece4; font-size:13px; align-items:baseline; }
@@ -773,11 +776,16 @@
         <div class="pane" v-if="stab==='cites'">
           <div class="muted" style="font-size:12px">文章裡的註腳編號點了會跳到這裡。逐筆確認：這句話寫的，摘要裡真的有。</div>
           <div v-if="!cur.citations.length" class="muted">這篇沒有註腳。</div>
-          <div v-for="c in cur.citations" :key="c.key" :id="'cite-card-' + c.key" class="cite">
+          <div v-else class="queue" style="padding:0">
+            <button v-for="f in CITE_FILTERS" :key="f.id" :class="{on: citeF===f.id}" @click="citeF=f.id">{{ f.label }} {{ cur.citations.filter(f.test).length }}</button>
+          </div>
+          <div v-if="cur.citations.length && !shownCites.length" class="muted">這個篩選沒有文獻。</div>
+          <div v-for="c in shownCites" :key="c.key" :id="'cite-card-' + c.key" class="cite">
             <div class="k">{{ c.key }} <span v-if="c.found" class="pill" :class="'s-'+c.status">{{ citeLabel(c.status) }}</span><span v-else class="pill s-rejected">文獻庫沒有</span></div>
             <div v-if="c.found" style="margin-top:4px"><b>{{ c.title_zh || c.title }}</b> <span class="muted">{{ c.year }}</span></div>
             <div class="ctx" v-for="(ctx, i) in c.contexts" :key="i" v-html="fmtCtx(ctx, c.key)"></div>
-            <div v-if="c.found && c.abstract_zh" class="a">{{ c.abstract_zh }}</div>
+            <div v-if="c.found && c.abstract_zh" class="a" :class="{open: absOpen[c.key]}" @click="absOpen[c.key] || toggleAbs(c.key)" :title="absOpen[c.key] ? '' : '點一下展開摘要全文'">{{ c.abstract_zh }}</div>
+            <div v-if="c.found && c.abstract_zh" class="a-hint" @click="toggleAbs(c.key)">{{ absOpen[c.key] ? '▲ 收起摘要' : '▼ 展開摘要全文' }}</div>
             <div v-if="c.found && c.url" style="margin-top:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
               <a :href="c.url" target="_blank" rel="noopener" class="btn sm open-src">開啟原文 ↗</a>
               <label style="font-size:12px; cursor:pointer"><input type="checkbox" :checked="c.url_verified" @change="citeSet(c.key, {url_verified: $event.target.checked})"> 我開過原文，網址有效</label>
@@ -963,9 +971,9 @@
           <div class="muted" style="line-height:1.7">小幫手在家、不在同一個網路時用。產生一個壓縮檔，用 LINE 或 Email 傳過去。全部 {{ arts.length }} 篇都會放進去，勾選的排在最前面，標成「這次請你看的」。</div>
           <h4>1　這次請小幫手先看哪些（{{ packSel.length }} 篇）</h4>
           <div class="queue" style="padding:0 0 8px">
-            <button @click="pickPack('todo')">還沒審的 {{ count(['todo', 'claimed']) }}</button>
-            <button @click="pickPack('changes')">需修改的 {{ count(['changes']) }}</button>
-            <button @click="pickPack('core')">核心 10 篇</button>
+            <button :class="{on: packIs('todo')}" @click="pickPack('todo')">還沒審的 {{ count(['todo', 'claimed']) }}</button>
+            <button :class="{on: packIs('changes')}" @click="pickPack('changes')">需修改的 {{ count(['changes']) }}</button>
+            <button :class="{on: packIs('core')}" @click="pickPack('core')">核心 10 篇</button>
             <button @click="packSel = []">全部取消</button>
           </div>
           <div class="plist">
@@ -2127,6 +2135,8 @@ createApp({
           // 手機沒有文獻分頁：點註腳就在原地顯示文獻名稱和摘要開頭，幾秒後收起
           if (phone.value) { showTip(); clearTimeout(link._tipT); link._tipT = setTimeout(() => tip.classList.remove('show'), 5000); return; }
           stab.value = 'cites'; showSide();
+          // 篩選把這筆藏起來的話，切回全部才找得到
+          if (!shownCites.value.some(c => c.key === link.getAttribute('data-cite'))) citeF.value = 'all';
           nextTick(() => { const el = document.getElementById('cite-card-' + link.getAttribute('data-cite')); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.style.boxShadow = '0 0 0 2px #b8860b'; setTimeout(() => el.style.boxShadow = '', 1500); } });
         });
       });
@@ -2285,9 +2295,28 @@ createApp({
       await loadHelper(); if (typeof loadCites === 'function') loadCites();
     }
     const packOrder = computed(() => arts.value.slice().sort((a, b) => ((a.priority || 999) - (b.priority || 999)) || (STAGE_ORDER[a.stage] - STAGE_ORDER[b.stage]) || (b.core - a.core) || a.file.localeCompare(b.file)));
+    const PACK_PICK = { todo: (a) => ['todo', 'claimed'].includes(a.stage), changes: (a) => a.stage === 'changes', core: (a) => a.core };
+    // 審稿側欄「文獻」分頁：篩選與摘要展開
+    const CITE_FILTERS = [
+      { id: 'all', label: '全部', test: () => true },
+      { id: 'todo', label: '還沒核准', test: (c) => c.found && c.status !== 'approved' },
+      { id: 'ok', label: '已核准', test: (c) => c.found && c.status === 'approved' },
+      { id: 'missing', label: '文獻庫沒有', test: (c) => !c.found },
+    ];
+    const citeF = ref('all');
+    const shownCites = computed(() => {
+      const f = CITE_FILTERS.find(x => x.id === citeF.value) || CITE_FILTERS[0];
+      return cur.value ? cur.value.citations.filter(f.test) : [];
+    });
+    const absOpen = ref({});
+    function toggleAbs(key) { absOpen.value = { ...absOpen.value, [key]: !absOpen.value[key] }; }
     function pickPack(kind) {
-      const pick = { todo: (a) => ['todo', 'claimed'].includes(a.stage), changes: (a) => a.stage === 'changes', core: (a) => a.core }[kind];
-      packSel.value = arts.value.filter(pick).map(a => a.slug);
+      packSel.value = arts.value.filter(PACK_PICK[kind]).map(a => a.slug);
+    }
+    // 目前勾選剛好等於哪個快速選項，那顆按鈕就亮起來；手動增減後不再相等就不亮
+    function packIs(kind) {
+      const want = arts.value.filter(PACK_PICK[kind]).map(a => a.slug);
+      return want.length > 0 && want.length === packSel.value.length && want.every(s => packSel.value.includes(s));
     }
     async function makePack() {
       busy.value = true;
@@ -2668,7 +2697,7 @@ createApp({
       runBuild, runLint, commit, push, runDeploy, saveName, closeGuide, count,
       askQuit, byeOwner, sessionLabel, saveAndQuit, quitOwner,
       takeCite, isHelper, hp, lan, lanBusy, openLan, lanToggle, share, openShare, copyShare, restartHelper, welcome, sent, askEnd, ending, bye, restoreAsk, helperInfo, packSel, packFull, packComments, packMsg, importRes, dropOver, conflict, choices,
-      askRestore, doRestore, fmtDate, loadHelper, packOrder, pickPack, makePack, isIncoming, pickResult, dropResult, openConflict, resolveConflict, discardConflict, markDiff,
+      askRestore, doRestore, fmtDate, loadHelper, packOrder, pickPack, packIs, makePack, CITE_FILTERS, citeF, shownCites, absOpen, toggleAbs, isIncoming, pickResult, dropResult, openConflict, resolveConflict, discardConflict, markDiff,
       helperLabel, listGroups, navList, lastSaved, startHelper, sendBack, openFolder, endReview, quitHelper, loadPack,
       xfer, xferCanvas, xferVideo, xferOpen, xferClose, xferSend, xferRecv, xferTune, xferImport,
     };
