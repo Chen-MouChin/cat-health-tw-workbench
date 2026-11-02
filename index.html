@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta name="robots" content="noindex, nofollow">
-<script src="shim.js?v=ca92f0ff9a"></script>
+<script src="shim.js?v=f2f854011b"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貓健康站 工作檯</title>
@@ -54,6 +54,7 @@
   table.rt td { padding:5px 4px; border-bottom:1px solid #f0ece4; vertical-align:top; }
   table.rt td.n { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
   .rt-q { margin:10px 0 12px; font-size:13px; }
+  .rt-sug { margin:8px 0 12px; padding:10px 12px; border:1px solid var(--line, #ddd); border-radius:8px; font-size:13px; background: var(--soft, transparent); }
   .rt-seg { display:flex; gap:4px; flex-wrap:wrap; margin-top:5px; }
   .rt-seg button { font:inherit; font-size:12px; border:1px solid var(--border); background:#fff; border-radius:8px; padding:4px 8px; cursor:pointer; }
   .rt-seg button.on { background:var(--green); border-color:var(--green); color:#fff; }
@@ -297,6 +298,10 @@
   .cite .a.open { max-height:none; cursor:default; }
   .cite .a-hint { font-size:12px; color:var(--muted); cursor:pointer; margin-top:2px; user-select:none; }
   .cite .a-hint:hover { color:var(--text); }
+  .cite-ed { margin-top:8px; border-top:1px dashed var(--border); padding-top:8px; font-size:12px; }
+  .cite-ed label { display:block; margin-top:6px; }
+  .cite-ed textarea { display:block; width:100%; box-sizing:border-box; margin-top:3px; font:inherit; font-size:13px; line-height:1.5; padding:6px; border:1px solid var(--border); border-radius:6px; resize:vertical; }
+  .cite-ed summary { cursor:pointer; margin-top:6px; }
   .ctx { margin-top:6px; padding:5px 8px; border-left:3px solid var(--faint); font-size:12px; color:#444; line-height:1.5; }
   .notes { white-space:pre-wrap; font-size:12px; line-height:1.55; background:#fbf7ee; border-left:3px solid var(--gold); padding:8px 10px; border-radius:0 6px 6px 0; max-height:40vh; overflow:auto; }
   .feed .row { display:flex; gap:8px; padding:6px 0; border-bottom:1px solid #f0ece4; font-size:13px; align-items:baseline; }
@@ -792,7 +797,23 @@
             </div>
             <div v-if="c.found" style="margin-top:8px; display:flex; gap:6px">
               <button v-if="isOwner" class="btn sm" :class="{ approved: c.status==='approved' }" @click="citeSet(c.key,{status:'approved', url_verified:true})" :disabled="c.status==='approved'">{{ c.status==='approved' ? '已核准 ✓' : '核准這筆文獻' }}</button>
+              <button class="btn sm" @click="ceOpen(c)" :disabled="!!citeEd[c.key]">補充／修訂</button>
               <button class="btn sm" @click="goCite(c.key)">編輯文獻</button>
+            </div>
+            <div v-if="citeEd[c.key]" class="cite-ed">
+              <label>貼上補充（存檔時接在摘要最後面）
+                <textarea v-model="citeEd[c.key].add" rows="4" placeholder="把要補的段落貼在這裡"></textarea></label>
+              <details :open="citeEd[c.key].full">
+                <summary @click.prevent="citeEd[c.key].full = !citeEd[c.key].full">修訂摘要全文</summary>
+                <textarea v-model="citeEd[c.key].abs" rows="10"></textarea>
+              </details>
+              <label>備註（notes，給自己看的，不會出現在網站）
+                <textarea v-model="citeEd[c.key].notes" rows="3"></textarea></label>
+              <div class="muted" style="font-size:12px">摘要要用自己的話寫，不要整段貼英文原文。</div>
+              <div style="display:flex; gap:6px; margin-top:6px">
+                <button class="btn sm primary" @click="ceSave(c)">存檔</button>
+                <button class="btn sm" @click="ceClose(c.key)">取消</button>
+              </div>
             </div>
           </div>
         </div>
@@ -805,6 +826,19 @@
             <tr v-for="x in cur.completion.parts" :key="x.label"><td>{{ x.label }}<div class="muted">{{ x.note }}</div></td><td class="n">{{ x.got }} / {{ x.max }}</td></tr>
           </table>
           <h4>優先等級</h4>
+          <div class="rt-sug" v-if="cur.rating_suggest">
+            <div style="font-weight:600">Claude 交叉查證的建議<span class="muted" style="font-weight:400; font-size:11px">　{{ cur.rating_suggest.at }}</span></div>
+            <template v-for="d in cur.rating_def" :key="'s'+d[0]"><div style="margin-top:6px" v-if="cur.rating_suggest[d[0]]">
+              <div>{{ d[1].split('：')[0] }}：<b>{{ cur.rating_suggest[d[0]].value }}　{{ d[2][cur.rating_suggest[d[0]].value - 1] }}</b>
+                <span v-if="cur.rating[d[0]] === cur.rating_suggest[d[0]].value" class="muted" style="font-size:11px">（已採用）</span>
+                <span v-else-if="cur.rating[d[0]]" class="muted" style="font-size:11px">（目前是 {{ cur.rating[d[0]] }}）</span></div>
+              <div class="muted" style="font-size:12px; line-height:1.6">{{ cur.rating_suggest[d[0]].reason }}</div>
+              <ul class="muted" style="font-size:11px; margin:2px 0 0; padding-left:18px" v-if="(cur.rating_suggest[d[0]].evidence || []).length">
+                <li v-for="(ev, i) in cur.rating_suggest[d[0]].evidence" :key="i">{{ ev }}</li>
+              </ul>
+            </div></template>
+            <button v-if="isOwner" type="button" class="btn primary sm" style="margin-top:8px" @click="acceptSuggest" :disabled="busy || suggestAdopted">{{ suggestAdopted ? '已採用建議' : '採用這兩個分數' }}</button>
+          </div>
           <div class="muted" style="font-size:12px">兩項各選 1–3 分，再點一次可以清掉。</div>
           <div class="rt-q" v-for="d in cur.rating_def" :key="d[0]">
             <div>{{ d[1] }}</div>
@@ -1572,6 +1606,8 @@ createApp({
     const queues = computed(() => {
       const q = [
         { id: 'mine', label: '可以審的', st: ['todo', 'changes', 'claimed'] },
+        // 還沒有人按通過或需修改的（灰色待審＋藍色有人在審），負責人 261103 要求單獨列出
+        { id: 'todo', label: '待審', st: ['todo', 'claimed'] },
         { id: 'passed', label: '通過', st: ['passed'] },
         { id: 'changes', label: '需修改', st: ['changes'] },
         { id: 'approved', label: '已上線', st: ['approved'] },
@@ -2220,6 +2256,24 @@ createApp({
       await reload();
       loadArts();
     }
+    // 評級建議：負責人按一次就把 Claude 建議的兩個分數寫進評分（記在負責人名下，等於認可）
+    const suggestAdopted = computed(() => {
+      const s = cur.value && cur.value.rating_suggest;
+      if (!s) return false;
+      return (cur.value.rating_def || []).every(d => !s[d[0]] || cur.value.rating[d[0]] === s[d[0]].value);
+    });
+    async function acceptSuggest() {
+      const s = cur.value && cur.value.rating_suggest;
+      if (!s) return;
+      for (const d of cur.value.rating_def) {
+        if (!s[d[0]] || cur.value.rating[d[0]] === s[d[0]].value) continue;
+        const r = await api.post(`/api/review/${cur.value.slug}/rating`, { key: d[0], value: s[d[0]].value });
+        if (r.error) return say(r.error, true);
+      }
+      say('已採用建議的分數');
+      await reload();
+      loadArts();
+    }
     async function sortByRating() {
       if (!confirm('把評過 A、B 級、還沒上線的文章，依分數高低排成優先清單。\n目前的優先清單會被換掉，之後還是可以用 ☆ 和 ≡ 調整。要繼續嗎？')) return;
       const r = await api.post('/api/priority/by-rating', {});
@@ -2310,6 +2364,27 @@ createApp({
     });
     const absOpen = ref({});
     function toggleAbs(key) { absOpen.value = { ...absOpen.value, [key]: !absOpen.value[key] }; }
+    // 文獻卡片上直接補充或修訂摘要、備註
+    const citeEd = ref({});
+    function ceOpen(c) { citeEd.value = { ...citeEd.value, [c.key]: { add: '', abs: c.abstract_zh || '', notes: c.notes || '', full: false, orig: c.abstract_zh || '' } }; }
+    function ceClose(key) { const n = { ...citeEd.value }; delete n[key]; citeEd.value = n; }
+    async function ceSave(c) {
+      const e = citeEd.value[c.key]; if (!e) return;
+      let abs = e.abs.replace(/\s+$/, '');
+      const add = e.add.trim();
+      if (add) abs = abs ? abs + '\n' + add : add;
+      const patch = {};
+      if (abs !== e.orig) patch.abstract_zh = abs;
+      if (e.notes !== (c.notes || '')) patch.notes = e.notes;
+      if (!Object.keys(patch).length) { ceClose(c.key); return say('沒有改動'); }
+      // 已核准的文獻改了摘要，要重新核准
+      const reopen = c.status === 'approved' && patch.abstract_zh !== undefined;
+      if (reopen) patch.status = 'pending_review';
+      const r = await api.post('/api/citations/' + c.key, patch);
+      if (r.error) return say(r.error, true);
+      ceClose(c.key); absOpen.value = { ...absOpen.value, [c.key]: true };
+      say(reopen ? '已存檔，摘要改了，這筆改回待審' : '已存檔'); if (cur.value) reload(); loadOverview();
+    }
     function pickPack(kind) {
       packSel.value = arts.value.filter(PACK_PICK[kind]).map(a => a.slug);
     }
@@ -2693,11 +2768,11 @@ createApp({
       setEditMode, undoCells, autoSize, editCellAt, finishCell, cellKey, cmdKey, addCell, moveCell, mergeCell, delCell, jumpCell, cellDown, cellComments,
       selIds, dragIds, dropAt, selectOnly, moveSel, delSel, cellDbl, dragStart, dragOver, dropCells, dragEnd,
       loadCites, loadGit, loadDeploy, refreshAll, open, openReview, openQueue, go, setView, saveEdit, claim, release, setCheck, setStage, approve, ownerReject, archive,
-      startComment, closeDraft, addComment, sendReply, resolve, delComment, applySugg, focusQuote, onIframeLoad, citeSet, citeSave, citeDirty, verify, goCite, togglePriority, dragSlug, dragStart, nudgePriority, starToggle, coreToggle, rate, sortByRating,
+      startComment, closeDraft, addComment, sendReply, resolve, delComment, applySugg, focusQuote, onIframeLoad, citeSet, citeSave, citeDirty, verify, goCite, togglePriority, dragSlug, dragStart, nudgePriority, starToggle, coreToggle, rate, sortByRating, suggestAdopted, acceptSuggest,
       runBuild, runLint, commit, push, runDeploy, saveName, closeGuide, count,
       askQuit, byeOwner, sessionLabel, saveAndQuit, quitOwner,
       takeCite, isHelper, hp, lan, lanBusy, openLan, lanToggle, share, openShare, copyShare, restartHelper, welcome, sent, askEnd, ending, bye, restoreAsk, helperInfo, packSel, packFull, packComments, packMsg, importRes, dropOver, conflict, choices,
-      askRestore, doRestore, fmtDate, loadHelper, packOrder, pickPack, packIs, makePack, CITE_FILTERS, citeF, shownCites, absOpen, toggleAbs, isIncoming, pickResult, dropResult, openConflict, resolveConflict, discardConflict, markDiff,
+      askRestore, doRestore, fmtDate, loadHelper, packOrder, pickPack, packIs, makePack, CITE_FILTERS, citeF, shownCites, absOpen, toggleAbs, citeEd, ceOpen, ceClose, ceSave, isIncoming, pickResult, dropResult, openConflict, resolveConflict, discardConflict, markDiff,
       helperLabel, listGroups, navList, lastSaved, startHelper, sendBack, openFolder, endReview, quitHelper, loadPack,
       xfer, xferCanvas, xferVideo, xferOpen, xferClose, xferSend, xferRecv, xferTune, xferImport,
     };

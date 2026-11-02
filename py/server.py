@@ -377,6 +377,7 @@ def article_detail(slug: str) -> dict | None:
             "title": c.get("title", ""), "title_zh": c.get("title_zh", ""), "status": c.get("status", ""),
             "abstract_zh": c.get("abstract_zh", ""), "url": c.get("url", ""), "year": c.get("year", ""),
             "url_verified": bool(c.get("url_verified")), "source": c.get("source", ""),
+            "notes": c.get("notes", ""),
         } if c else {})})
     sources = re.findall(r'^\s+-\s+"?(.+?)"?\s*$', fm_raw.split("sources:")[1].split("\n\n")[0], re.M) if "sources:" in fm_raw else []
     h1 = first_h1(body)
@@ -425,6 +426,7 @@ def article_detail(slug: str) -> dict | None:
         "completion": (comp := completion(body, r, citations, rec, STORE.effective_stage(rec, quality))),
         "rating": priority_rating(rec, comp["total"]),
         "rating_def": reviews.RATING,
+        "rating_suggest": rating_suggest(slug),
         "body": body, "lint": {"fails": r["fails"], "warns": r["warns"], "chars": r["chars"]},
         "citations": cites, "html": f"/site/articles/{slug}.html",
         "review_notes": fm.get("review_notes", ""),
@@ -745,6 +747,15 @@ def priority_order() -> dict[str, int]:
 
 # 核心文章：負責人在文章頁勾選，存在 research/reviews/_core.json；檔案還沒有時用 CORE_SLUGS 當預設
 CORE_FILE = RESEARCH / "reviews" / "_core.json"
+
+# 評級建議：Claude 交叉查證後寫的讀者需求、寫錯風險分數與理由（負責人 261103 要求），負責人在評級頁按「採用」才算數
+RATING_SUGGEST_FILE = RESEARCH / "reviews" / "_rating_suggest.json"
+
+
+def rating_suggest(slug: str):
+    data = _jload(RATING_SUGGEST_FILE, {})
+    s = data.get(slug) if isinstance(data, dict) else None
+    return s if isinstance(s, dict) else None
 
 
 def core_slugs() -> set[str]:
