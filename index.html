@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta name="robots" content="noindex, nofollow">
-<script src="shim.js?v=f2f854011b"></script>
+<script src="shim.js?v=1e4be016bb"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>貓健康站 工作檯</title>
@@ -44,6 +44,12 @@
   .st-approved { background:var(--green-bg); color:var(--green); border-color:#b8d8bf; }
   .s-approved { background:var(--green-bg); color:var(--green); }
   .s-pending_review, .s-needs_review { background:var(--amber-bg); color:var(--amber); }
+  .pill.grade { font-weight:700; }
+  .g-A { background:var(--green-bg); color:var(--green); } .g-B { background:var(--amber-bg); color:var(--amber); }
+  .g-C, .g-D { background:#fbe9e7; color:#8f2a21; }
+  .grade-tabs { display:inline-flex; gap:4px; flex-wrap:wrap; } .grade-tabs .btn.on { background:var(--accent, #3b6a50); color:#fff; }
+  .triage { margin-top:8px; font-size:13px; border-left:3px solid var(--border, #ddd); padding-left:10px; }
+  .triage ul { margin:4px 0; padding-left:18px; } .tri-todo { color:#8f2a21; } .triage summary { cursor:pointer; color:var(--muted, #666); }
   .s-rejected { background:#f6e3df; color:var(--red); }
   .tag-core { font-size:10px; color:var(--gold); border:1px solid var(--gold); border-radius:6px; padding:0 4px; }
   .tag-lv { font-size:10px; font-weight:700; border-radius:6px; padding:0 5px; border:1px solid; }
@@ -880,6 +886,9 @@
       <div class="toolbar">
         <select v-model="cs" @change="loadCites"><option value="">全部狀態</option><option value="pending_review">待審</option><option value="needs_review">需要再看</option><option value="approved">已核准</option><option value="rejected">不採用</option></select>
         <label><input type="checkbox" v-model="onlyCited"> 只看被引用的</label>
+        <span class="grade-tabs" v-if="cites.some(c => c.triage)">
+          <button v-for="g in GRADE_TABS" :key="g.id" class="btn sm" :class="{on: cg===g.id}" @click="cg=g.id" :title="g.tip">{{ g.label }} {{ cites.filter(c => g.test(c)).length }}</button>
+        </span>
         <input v-model="cq" placeholder="搜尋 key / 標題" style="width:200px">
         <span class="muted">{{ citesFiltered.length }} 筆</span>
         <span class="muted" v-if="!isOwner" style="font-size:12px">你可以核對原文、修中文摘要<template v-if="isHelper">（寄回時會一起帶回去）</template>；核准由網站負責人按。</span>
@@ -888,6 +897,7 @@
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
           <span style="font-family:ui-monospace,monospace; font-size:12px">{{ c.key }}</span>
           <span class="pill" :class="'s-'+c.status">{{ citeLabel(c.status) }}</span>
+          <span v-if="c.triage" class="pill grade" :class="'g-'+c.triage.grade" :title="GRADE_TIP[c.triage.grade]">{{ c.triage.grade }} {{ GRADE_NAME[c.triage.grade] }}</span>
           <span class="muted" style="font-size:12px">{{ c.source }} · {{ c.year }} · 被 {{ c.cited_by.length }} 篇引用</span>
           <a v-if="c.url" :href="c.url" target="_blank" rel="noopener" class="btn sm open-src">原文 ↗</a>
           <a v-if="c.pdf_url" :href="c.pdf_url" target="_blank" rel="noopener" class="btn sm open-src">PDF ↗</a>
@@ -909,6 +919,10 @@
             </template>
             <button class="btn" @click="citeSave(c,'needs_review','flag')" :disabled="c._save === 'saving'" v-else>標成需要再看</button>
           </span>
+        </div>
+        <div v-if="c.triage" class="triage">
+          <div v-if="c.triage.todo.length" class="tri-todo"><b>要人工看</b><ul><li v-for="(t, i) in c.triage.todo" :key="'t'+i">{{ t }}</li></ul></div>
+          <details :open="!c.triage.todo.length"><summary>程式整理的證據（{{ c.triage.from }}）</summary><ul><li v-for="(e, i) in c.triage.evidence" :key="'e'+i">{{ e }}</li></ul></details>
         </div>
         <div class="cite-state">
           <span v-if="isOwner && !c.url_verified && c.status !== 'approved'" class="muted">要核准，先打開原文核對，再勾「網址已驗證」</span>
@@ -1555,7 +1569,15 @@ createApp({
     const activeCid = ref(''), replyTo = ref(''), replyText = ref('');
     const askName = ref(false), nameInput = ref(reviewerName), showGuide = ref(false);
     const dep = ref(null), depOut = ref('');
-    const cites = ref([]), cs = ref(''), cq = ref(''), onlyCited = ref(true);
+    const cites = ref([]), cs = ref(''), cq = ref(''), onlyCited = ref(true), cg = ref('all');
+    // 文獻分級（research/verify_llm/triage.py）：AI 整理證據，負責人裁決
+    const GRADE_NAME = { A: '低風險', B: '中風險', C: '高風險', D: '不可驗證' };
+    const GRADE_TIP = { A: '讀過全文或完整網頁、書目相符、核對出的問題都已改：快速覆核後核准', B: '只有摘要或無法自動比對書目：檢查引用範圍與措辭',
+                        C: '書目對不上、原文核對有寫錯或原文沒寫：逐項人工查證', D: '抓不到原文或還沒核對：暫停引用、換來源或人工開網頁' };
+    const GRADE_TABS = [
+      { id: 'all', label: '全部分級', tip: '', test: () => true },
+      ...['A', 'B', 'C', 'D'].map(g => ({ id: g, label: g + ' ' + GRADE_NAME[g], tip: GRADE_TIP[g], test: (c) => c.triage && c.triage.grade === g })),
+    ];
     // 文獻卡可編輯的欄位；和載入時的快照比，就知道有沒有改了還沒存
     const citeSnap = (c) => JSON.stringify([c.title_zh || '', c.abstract_zh || '', c.notes || '', c.url || '', !!c.url_verified]);
     const citeDirty = (c) => c._orig !== undefined && citeSnap(c) !== c._orig;
@@ -2763,7 +2785,17 @@ createApp({
       phone, plist, sheet, sheetOpen, phoneComment, phonePass, phoneChanges, wbTok, tablet, tport, tlist, tside, hdr,
       activeCid, replyTo, replyText, askName, nameInput, showGuide, dep, depOut, cites, cs, cq, onlyCited, out, git, msg, busy, toast, toastErr,
       pct, fmtTime, fmtAgo, fmtCtx, citeLabel, titleOf, diffLines, categories, queues, filtered, openComments, resolvedComments, chk, checkedCount, canPass, passWhy, steps, quoteInRaw,
-      citesFiltered: computed(() => cites.value.filter(c => (!onlyCited.value || c.cited_by.length) && (!cq.value || c.key.includes(cq.value) || (c.title || '').includes(cq.value) || (c.title_zh || '').includes(cq.value)))),
+      citesFiltered: computed(() => {
+        const tab = GRADE_TABS.find(g => g.id === cg.value) || GRADE_TABS[0];
+        const order = { C: 0, D: 1, B: 2, A: 3 };
+        return cites.value.filter(c => tab.test(c) && (!onlyCited.value || c.cited_by.length) && (!cq.value || c.key.includes(cq.value) || (c.title || '').includes(cq.value) || (c.title_zh || '').includes(cq.value)))
+          // 有分級的照風險排（高風險在前），同級引用多的在前；沒分級的維持原順序放後面
+          .map((c, i) => [c, i]).sort((a, b) => {
+            const ga = a[0].triage ? order[a[0].triage.grade] : 9, gb = b[0].triage ? order[b[0].triage.grade] : 9;
+            return ga - gb || (gb === 9 ? a[1] - b[1] : b[0].cited_by.length - a[0].cited_by.length || a[1] - b[1]);
+          }).map(x => x[0]);
+      }),
+      cg, GRADE_TABS, GRADE_NAME, GRADE_TIP,
       editMode, cells, selId, editId, undoStack, cellsBox, origTexts, firstBody, sections, KIND_LABEL, kindOf, renderCell,
       setEditMode, undoCells, autoSize, editCellAt, finishCell, cellKey, cmdKey, addCell, moveCell, mergeCell, delCell, jumpCell, cellDown, cellComments,
       selIds, dragIds, dropAt, selectOnly, moveSel, delSel, cellDbl, dragStart, dragOver, dropCells, dragEnd,

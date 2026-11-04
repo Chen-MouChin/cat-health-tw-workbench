@@ -68,6 +68,21 @@ ROOT = Path(HELPER_ROOT).resolve() if HELPER else Path(__file__).resolve().paren
 FRONTEND = ROOT / "frontend"
 ARTICLES = ROOT / "content" / "articles"
 CITATIONS = ROOT / "content" / "references" / "citations.json"
+
+
+def load_triage() -> dict:
+    """research/reviews/文獻分級-*/triage.json（最新的那份）→ {key: {grade, evidence, todo}}；沒有就回傳空的（小幫手那邊沒有 research/）"""
+    dirs = sorted((ROOT / "research" / "reviews").glob("文獻分級-*"), key=lambda d: d.name)
+    for d in reversed(dirs):
+        f = d / "triage.json"
+        if f.exists():
+            try:
+                rows = json.loads(f.read_text(encoding="utf-8"))
+            except ValueError:
+                return {}
+            return {r["key"]: {"grade": r.get("grade", ""), "evidence": r.get("evidence", []), "todo": r.get("todo", []),
+                               "from": d.name} for r in rows if isinstance(r, dict) and r.get("key")}
+    return {}
 WB = Path(__file__).resolve().parent
 
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -1622,6 +1637,7 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/citations":
                 data = load_citations()
                 status = qs.get("status", [""])[0]
+                tri = {} if HELPER else load_triage()
                 items = []
                 for k, v in data.items():
                     if k == "_meta":
@@ -1630,7 +1646,9 @@ class Handler(SimpleHTTPRequestHandler):
                         continue
                     items.append({"key": k, **{f: v.get(f, "") for f in (
                         "title", "title_zh", "authors", "source", "year", "url", "pdf_url", "status", "abstract_zh", "notes", "type")},
-                        "url_verified": bool(v.get("url_verified")), "cited_by": v.get("cited_by") or []})
+                        "url_verified": bool(v.get("url_verified")), "cited_by": v.get("cited_by") or [],
+                        # 文獻分級只對還沒核准的有意義；核准後不顯示
+                        "triage": tri.get(k) if v.get("status") != "approved" else None})
                 return self._json(items)
             if path == "/api/git":
                 st = run(["git", "status", "--porcelain"], 60)
