@@ -580,6 +580,8 @@ def set_quality(slug: str, quality: str, note: str, who: str = OWNER_NAME, confi
 
         set_line("quality", quality)
         set_line("last_reviewed", today if quality in ("reviewed", "featured") else "null")
+        # 261118 起草稿也會以 preview 上線：工作檯「下架」改回 draft 時寫 preview: false，build 才會真的拿掉；核准時拿掉這行
+        set_line("preview", "false" if quality == "draft" else None)
         # 審稿備註改存在 research/reviews/（不進 git），frontmatter 不留
         set_line("review_notes", None)
         new = head + "\n".join(lines) + sep + body
